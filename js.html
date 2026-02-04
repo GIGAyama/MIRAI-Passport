@@ -2,6 +2,7 @@
 /**
  * みらいパスポート v1.0
  * Robust Logic & Readable Code Refactoring
+ * Update: Child-friendly Rubric Terms & Rich Editor Features
  */
 
 // ==============================================
@@ -200,6 +201,8 @@ const App = {
         document.getElementById('setupWizard').classList.add('d-none');
         document.getElementById('appContainer').classList.remove('d-none');
         App.loadConfig();
+        // ★ Editor機能の初期化
+        Editor.init();
       } else {
         UI.hideLoading();
         document.getElementById('setupWizard').classList.remove('d-none');
@@ -383,6 +386,10 @@ const App = {
             </div>
           </div>`;
       }
+      
+      // ★ 読み込み後に編集機能を有効化
+      if(APP_CONFIG.mode === 'teacher') Editor.enableResizing();
+
     } finally {
       UI.hideLoading();
     }
@@ -448,6 +455,10 @@ const App = {
             await App.loadMyResponse();
           }, 500);
         }
+        
+        // ★ 履歴展開後も編集機能有効化
+        if(APP_CONFIG.mode === 'teacher') Editor.enableResizing();
+        
       } else {
         Swal.fire('エラー', 'データが見つかりません。削除された可能性があります。', 'error');
       }
@@ -471,8 +482,10 @@ const App = {
       }
 
       const info = State.unitData?.unitInfo || { grade: "", unitName: "" };
+      
+      // プロンプト改善: リッチなヘッダー・フッターを含むHTMLテンプレートを強制
       const prompt = `
-        あなたは日本の小学校教師です。以下の授業情報からワークシートのHTML(body内部のみ)を作成してください。
+        あなたは日本の小学校教師です。以下の授業情報から、児童が取り組むためのワークシートのHTML(body内部のみ)を作成してください。
         
         【授業情報】
         学年: ${info.grade}
@@ -481,15 +494,51 @@ const App = {
         活動内容: ${State.currentTask.description}
         ${extraContext}
         
-        【出力要件】
-        1. 出力は純粋なHTMLコードのみとしてください。Markdown記法（\`\`\`html）や挨拶文は一切不要です。
-        2. 以下のCSSクラスを使ってデザインしてください：
-           - <div class="ws-header">...</div> (名前欄など)
-           - <h1>タイトル</h1>
-           - <div class="ws-box">...</div> (囲み枠・記述欄)
-           - <div class="ws-lines">...</div> (罫線のみの記述欄)
-           - <table class="table table-bordered">...</table> (表)
-        3. 低学年の場合は漢字を減らし、平易な表現にしてください。
+        【出力HTMLの構成（厳守）】
+        以下のHTML構造をテンプレートとしてそのまま使用し、「3. 本文エリア」の中身のみを活動内容に合わせて記述してください。
+        Markdown記法(\`\`\`html)は禁止です。
+
+        <!-- 1. リッチヘッダー -->
+        <div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px; font-family: 'Zen Maru Gothic', sans-serif;">
+           <div>
+             <span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7em; margin-right:5px;">${info.grade}</span>
+             <span style="font-weight:bold; color:#333;">${info.unitName}</span>
+           </div>
+           <div style="text-align:right; font-size:0.9em;">
+             <span style="margin-right:15px;">年　組　番</span>
+             <span style="font-weight:bold; font-size:1.1em;">名前 __________________</span>
+           </div>
+        </div>
+
+        <!-- 2. タイトル（本文内での重複禁止） -->
+        <h1 style="text-align:center; font-size:1.8em; margin-bottom:30px; border-bottom:1px solid #ddd; padding-bottom:10px;">${State.currentTask.title}</h1>
+
+        <!-- 3. 本文エリア（ここをAIが生成） -->
+        <!-- 挨拶文不要。具体的な問いと記述欄(ws-lines, ws-box)を中心に構成 -->
+        <div style="min-height: 400px;">
+          (ここに学習課題・問い・記述欄を生成。クラス名: ws-box, ws-lines, table table-bordered を活用)
+        </div>
+
+        <!-- 4. コンパクトフッター（振り返り＆自己評価） -->
+        <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px; align-items: start;">
+          <!-- 振り返り (60%) -->
+          <div style="flex: 6;">
+            <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px; color:#555;">■ ふりかえり</div>
+            <div class="ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em; line-height: 1.5em;"></div>
+          </div>
+          <!-- 自己評価 (40%) -->
+          <div style="flex: 4;">
+            <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px; color:#555;">■ 自己評価</div>
+            <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center; background:#fff;">
+              <tr><td class="bg-light text-start">わかった・できた</td><td width="60" style="vertical-align:middle;">A B C</td></tr>
+              <tr><td class="bg-light text-start">考えた・表した</td><td style="vertical-align:middle;">A B C</td></tr>
+              <tr><td class="bg-light text-start">進んで学んだ</td><td style="vertical-align:middle;">A B C</td></tr>
+            </table>
+          </div>
+        </div>
+
+        【配慮】
+        低学年の場合は漢字を減らし、平易な表現にしてください。
       `;
 
       let html = await Server.call('callGeminiAPI', prompt);
@@ -544,7 +593,44 @@ const App = {
         UI.updateBatchProgress(Math.round(((i) / queue.length) * 100), `${i + 1} / ${queue.length}: ${task.title}`);
         
         try {
-          const prompt = `小学校ワークシートHTML作成: 学年${info.grade}, 単元${info.unitName}, タイトル:${task.title}, 活動:${task.description}。Markdown禁止。HTMLのみ。`;
+          // 一括生成用も同様にプロンプトをテンプレート化
+          const prompt = `
+            あなたは小学校教師です。以下の授業情報からワークシートHTMLを作成してください。
+            
+            授業情報: 学年:${info.grade}, 単元:${info.unitName}, タイトル:${task.title}, 活動:${task.description}
+            
+            【出力HTML構成（厳守）】
+            <!-- 1. ヘッダー -->
+            <div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px;">
+               <div><span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.8em;">${info.grade}</span> <b>${info.unitName}</b></div>
+               <div style="text-align:right;">年 組 番 <b>名前 __________</b></div>
+            </div>
+            
+            <!-- 2. タイトル -->
+            <h1 style="text-align:center; margin-bottom:30px; border-bottom:1px solid #ddd;">${task.title}</h1>
+            
+            <!-- 3. 本文 (ここを生成) -->
+            <div style="min-height: 400px;">
+              (問いと記述欄を生成)
+            </div>
+            
+            <!-- 4. フッター -->
+            <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">
+              <div style="flex: 6;">
+                <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ ふりかえり</div>
+                <div class="ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em;"></div>
+              </div>
+              <div style="flex: 4;">
+                <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ 自己評価</div>
+                <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center;">
+                  <tr><td class="bg-light">わかった・できた</td><td>A B C</td></tr>
+                  <tr><td class="bg-light">考えた・表した</td><td>A B C</td></tr>
+                  <tr><td class="bg-light">進んで学んだ</td><td>A B C</td></tr>
+                </table>
+              </div>
+            </div>
+          `;
+          
           let html = await Server.call('callGeminiAPI', prompt);
           html = App.cleanAIOutput(html);
           
@@ -865,6 +951,153 @@ const App = {
       }
     }
     e.insertAdjacentHTML('beforeend', html);
+  }
+};
+
+// ==============================================
+// Rich Editor Module (Context Menu & Resizing)
+// ==============================================
+const Editor = {
+  currentTarget: null,
+
+  init: () => {
+    // 1. Create Context Menu DOM
+    const menu = document.createElement('div');
+    menu.id = 'ctxMenu';
+    menu.className = 'dropdown-menu shadow';
+    menu.style.position = 'fixed';
+    menu.style.display = 'none';
+    menu.style.zIndex = '9999';
+    document.body.appendChild(menu);
+
+    // 2. Global Event Listeners
+    document.addEventListener('contextmenu', (e) => {
+      // ワークシート内のみ反応
+      const ws = document.getElementById('worksheetContent');
+      if (!ws || !ws.contains(e.target)) return;
+
+      e.preventDefault();
+      Editor.showContextMenu(e, menu);
+    });
+
+    document.addEventListener('click', () => menu.style.display = 'none');
+    
+    // 3. Inject Styles for Resizing & Hover
+    Editor.enableResizing();
+  },
+
+  enableResizing: () => {
+    // 既存のスタイルタグがあれば削除して再作成（重複防止）
+    const oldStyle = document.getElementById('editor-style');
+    if(oldStyle) oldStyle.remove();
+
+    const style = document.createElement('style');
+    style.id = 'editor-style';
+    style.innerHTML = `
+      .ws-box, .ws-lines { 
+        resize: vertical; 
+        overflow: hidden; /* ハンドル表示に必須 (visible以外) */
+        position: relative;
+        min-height: 50px;
+      }
+      /* 印刷時にハンドルを消す */
+      @media print { .ws-box, .ws-lines { resize: none; overflow: visible; } }
+      
+      /* 編集モード時の視覚フィードバック */
+      #worksheetContent[contenteditable="true"] .ws-box:hover,
+      #worksheetContent[contenteditable="true"] .ws-lines:hover,
+      #worksheetContent[contenteditable="true"] table:hover {
+        outline: 2px dashed #a2d2ff;
+        cursor: text;
+      }
+    `;
+    document.head.appendChild(style);
+  },
+
+  showContextMenu: (e, menu) => {
+    const t = e.target;
+    let items = [];
+    Editor.currentTarget = t;
+
+    // テーブル操作
+    const td = t.closest('td, th');
+    if (td) {
+      items = [
+        { label: '<i class="bi bi-arrow-bar-up"></i> 行を上に追加', action: () => Editor.tableAction('addRowUp', td) },
+        { label: '<i class="bi bi-arrow-bar-down"></i> 行を下に追加', action: () => Editor.tableAction('addRowDown', td) },
+        { divider: true },
+        { label: '<i class="bi bi-arrow-bar-left"></i> 列を左に追加', action: () => Editor.tableAction('addColLeft', td) },
+        { label: '<i class="bi bi-arrow-bar-right"></i> 列を右に追加', action: () => Editor.tableAction('addColRight', td) },
+        { divider: true },
+        { label: '<i class="bi bi-trash"></i> 行を削除', action: () => Editor.tableAction('delRow', td) },
+        { label: '<i class="bi bi-trash"></i> 列を削除', action: () => Editor.tableAction('delCol', td) }
+      ];
+    } 
+    // ボックス操作 (.ws-box, .ws-lines)
+    else if (t.classList.contains('ws-box') || t.classList.contains('ws-lines')) {
+      items = [
+        { label: '<i class="bi bi-files"></i> ボックスを複製', action: () => Editor.cloneElement(t) },
+        { label: '<i class="bi bi-trash"></i> 削除', action: () => t.remove() }
+      ];
+    }
+    // 一般テキスト操作
+    else {
+      items = [
+        { label: '<i class="bi bi-type-bold"></i> 太字', action: () => document.execCommand('bold') },
+        { label: '<i class="bi bi-trash"></i> 削除', action: () => t.remove() }
+      ];
+    }
+
+    if (items.length === 0) return;
+
+    // メニュー構築
+    menu.innerHTML = '';
+    items.forEach(i => {
+      if (i.divider) {
+        menu.innerHTML += '<div class="dropdown-divider"></div>';
+      } else {
+        const a = document.createElement('a');
+        a.className = 'dropdown-item';
+        a.href = '#';
+        a.innerHTML = i.label;
+        a.onclick = (ev) => { ev.preventDefault(); i.action(); };
+        menu.appendChild(a);
+      }
+    });
+
+    // 表示位置
+    menu.style.left = `${e.pageX}px`;
+    menu.style.top = `${e.pageY}px`;
+    menu.style.display = 'block';
+  },
+
+  tableAction: (type, cell) => {
+    const row = cell.parentElement;
+    const table = row.parentElement.parentElement; // thead/tbody -> table
+    const rowIndex = row.rowIndex;
+    const colIndex = cell.cellIndex;
+
+    switch(type) {
+      case 'addRowUp': table.insertRow(rowIndex); break;
+      case 'addRowDown': table.insertRow(rowIndex + 1); break;
+      case 'delRow': table.deleteRow(rowIndex); break;
+      case 'addColLeft': 
+        for (let r of table.rows) r.insertCell(colIndex); 
+        break;
+      case 'addColRight': 
+        for (let r of table.rows) r.insertCell(colIndex + 1); 
+        break;
+      case 'delCol': 
+        for (let r of table.rows) r.deleteCell(colIndex); 
+        break;
+    }
+    // 新しいセルの中身を空にするなどの初期化が必要ならここで行う
+    // 簡易的に空セルを追加している
+  },
+
+  cloneElement: (el) => {
+    const clone = el.cloneNode(true);
+    el.after(clone);
   }
 };
 
