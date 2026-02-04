@@ -18,7 +18,14 @@
   <?!= include('css'); ?>
   
   <script>
-    const APP_CONFIG = { mode: <?= mode ?>, taskId: <?= taskId ?> };
+    // Config Injection from Server (Updated for Phase 2 Integration)
+    // 連携用の studentId, studentName を受け取れるようにクォート付きで展開
+    const APP_CONFIG = { 
+      mode: "<?= mode ?>", 
+      taskId: "<?= taskId ?>",
+      studentId: "<?= studentId ?>",     // Phase 2: 連携用ID
+      studentName: "<?= studentName ?>"  // Phase 2: 連携用名前
+    };
   </script>
 </head>
 <body class="<?= mode === 'student' ? 'student-mode' : '' ?>">
