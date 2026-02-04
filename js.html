@@ -1,8 +1,8 @@
 <script>
 /**
- * みらいパスポート v1.0
- * Robust Logic & Readable Code Refactoring
- * Update: Child-friendly Rubric Terms & Rich Editor Features
+ * みらいパスポート v2.1
+ * Update: Unified Print System (Integrated)
+ * Keeps all previous features (Stamps, Plaza, Edit Lock) intact.
  */
 
 // ==============================================
@@ -59,6 +59,126 @@ const UI = {
   toggleBatchProgress: (show) => {
     const el = document.getElementById('batchProgressContainer');
     if (el) show ? el.classList.remove('d-none') : el.classList.add('d-none');
+  }
+};
+
+// ==============================================
+// ★ Unified Print System (New)
+// ==============================================
+const Printer = {
+  /**
+   * 統一印刷ロジック: 別ウィンドウを開いて印刷を実行
+   * @param {Array} pages - { html: string, img: string(base64/url) } の配列
+   */
+  run: (pages) => {
+    if (!pages || pages.length === 0) return;
+
+    // 1. 新しいウィンドウを開く
+    const win = window.open('', '_blank');
+    if (!win) {
+      return Swal.fire('エラー', 'ポップアップがブロックされました。許可してください。', 'error');
+    }
+
+    // 2. 現在のスタイルシートを収集 (Bootstrapやフォント等)
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map(el => el.outerHTML)
+      .join('');
+
+    // 3. 印刷専用CSS (ウィンドウ内でのみ有効)
+    const printCss = `
+      <style>
+        body { 
+          margin: 0; padding: 0; background: white; 
+          font-family: "Zen Maru Gothic", sans-serif;
+        }
+        @media print {
+          @page { margin: 0; size: A4; }
+          body { margin: 0; padding: 0; }
+          .print-sheet {
+            width: 100%;
+            height: auto; 
+            min-height: 297mm; /* A4縦 */
+            position: relative;
+            box-sizing: border-box;
+            padding: 15mm; /* 余白 */
+            page-break-after: always;
+            break-after: always;
+            overflow: visible;
+          }
+          .print-sheet:last-child {
+            page-break-after: auto;
+            break-after: auto;
+          }
+          .print-overlay {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; 
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+          }
+          /* 改ページ制御 */
+          .ws-box, .ws-lines, table, tr, .ws-header, h1 {
+            break-inside: avoid;
+          }
+          /* 背景色強制 */
+          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          /* スタンプの見た目 */
+          .eval-btn:not(.active) { opacity: 0.1; border-color: #eee; }
+          /* 不要なUI非表示 */
+          .btn, button, .no-print { display: none !important; }
+        }
+        /* 画面表示用 (プレビュー) */
+        .print-sheet {
+          border-bottom: 1px dashed #ccc;
+          margin-bottom: 20px;
+        }
+      </style>
+    `;
+
+    // 4. コンテンツ構築
+    let contentHtml = '';
+    pages.forEach(p => {
+      contentHtml += `
+        <div class="print-sheet">
+          <div class="print-content">${p.html}</div>
+          ${p.img ? `<img src="${p.img}" class="print-overlay">` : ''}
+        </div>
+      `;
+    });
+
+    // 5. 書き込みと印刷実行
+    win.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>印刷プレビュー</title>
+          ${styles}
+          ${printCss}
+        </head>
+        <body class="print-only-container">
+          ${contentHtml}
+          <script>
+            // 画像などの読み込みを待ってから印刷
+            window.onload = () => {
+              setTimeout(() => {
+                window.focus();
+                window.print();
+                // 印刷ダイアログ終了後に閉じる
+                // (ブラウザによっては即座に閉じる場合もあるため、この挙動が最も安全)
+                try {
+                   // Chrome等ではprintブロック後のコードが即実行されない場合があるため
+                   // onafterprintイベントも併用するとより確実ですが、
+                   // シンプルにタイムアウトでも多くの場合は機能します。
+                   window.close();
+                } catch(e) {}
+              }, 1000);
+            };
+          <\/script>
+        </body>
+      </html>
+    `);
+    win.document.close();
   }
 };
 
@@ -127,37 +247,6 @@ const Modals = {
     } finally {
       UI.hideLoading();
     }
-  },
-
-  openGallery: async () => {
-    UI.showLoading("広場へ移動中...");
-    try {
-      const items = await Server.call('getSharedResponses', State.currentTask.id);
-      const grid = document.getElementById('galleryGrid');
-      grid.innerHTML = '';
-      
-      if (!items || items.length === 0) {
-        grid.innerHTML = '<div class="col-12 text-center py-5 text-muted">共有されている作品はありません</div>';
-      } else {
-        items.forEach(i => {
-          const col = document.createElement('div');
-          col.className = 'col-md-4 mb-3';
-          col.innerHTML = `
-            <div class="card h-100 shadow-sm">
-              <div class="bg-light d-flex align-items-center justify-content-center" style="height:200px; overflow:hidden;">
-                <img src="${i.canvasImage}" class="img-fluid" style="max-height:100%;">
-              </div>
-              <div class="card-body text-center p-2">
-                <small class="fw-bold">${i.studentName}</small>
-              </div>
-            </div>`;
-          grid.appendChild(col);
-        });
-      }
-      new bootstrap.Modal(document.getElementById('galleryModal')).show();
-    } finally {
-      UI.hideLoading();
-    }
   }
 };
 
@@ -168,11 +257,14 @@ const State = {
   unitData: null,      // 単元計画データ (JSON)
   currentTask: null,   // 現在選択中の授業タスク
   fabricCanvas: null,  // 手書きキャンバスインスタンス
+  peerCanvas: null,    // 友達の回答閲覧用キャンバス
   isDrawMode: false,   // 手書きモードフラグ
   ocrCache: "",        // OCR解析結果テキスト
   studentId: null,     // 児童ID (LocalStorage)
   gradingRow: null,    // 添削中の行番号
-  dashboardData: []    // ダッシュボード用データキャッシュ
+  dashboardData: [],   // ダッシュボード用データキャッシュ
+  isGalleryMode: false,// ギャラリーモードフラグ
+  currentPeerResponse: null // 現在閲覧中の友達の回答
 };
 
 // ==============================================
@@ -193,6 +285,18 @@ const App = {
       setInterval(App.autoSaveLocal, 10000);
     }
 
+    // Global Event Listener for Evaluation Stamps (delegation)
+    document.body.addEventListener('click', (e) => {
+      const btn = e.target.closest('.eval-btn');
+      if (btn) {
+        const cell = btn.closest('td');
+        if (cell) {
+          cell.querySelectorAll('.eval-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      }
+    });
+
     // View Setup
     if (APP_CONFIG.mode === 'teacher') {
       UI.showLoading("システムを起動しています", "ユーザー設定を確認中...");
@@ -201,7 +305,6 @@ const App = {
         document.getElementById('setupWizard').classList.add('d-none');
         document.getElementById('appContainer').classList.remove('d-none');
         App.loadConfig();
-        // ★ Editor機能の初期化
         Editor.init();
       } else {
         UI.hideLoading();
@@ -247,42 +350,27 @@ const App = {
     bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
   },
 
-  // --- Data Management (JSON Import) ---
+  // --- Data Management ---
 
   processImport: () => {
     try {
       const inputVal = document.getElementById('jsonInput').value;
-      
-      // クリーニング: Markdown記法や余計な文字を削除してJSON部分を抽出
       const firstBrace = inputVal.indexOf('{');
       const lastBrace = inputVal.lastIndexOf('}');
-      
-      if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error("有効なJSONデータが見つかりません。");
-      }
+      if (firstBrace === -1 || lastBrace === -1) throw new Error("有効なJSONデータが見つかりません。");
       
       const jsonString = inputVal.substring(firstBrace, lastBrace + 1);
       const json = JSON.parse(jsonString);
 
-      // 簡易バリデーション
-      if (!json.tasks || !Array.isArray(json.tasks)) {
-        throw new Error("JSONデータに 'tasks' 配列が含まれていません。");
-      }
+      if (!json.tasks || !Array.isArray(json.tasks)) throw new Error("JSONデータに 'tasks' 配列が含まれていません。");
 
       State.unitData = json;
       App.renderTaskList();
-      
       bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
       UI.toast('計画を読み込みました');
-      
     } catch (e) {
       console.error(e);
-      Swal.fire({
-        icon: 'error',
-        title: 'JSON読み込みエラー',
-        text: '形式が正しくありません。エラー詳細: ' + e.message,
-        footer: 'AIが生成したコードブロック(```json)が含まれていても自動除去しますが、構文自体が壊れている可能性があります。'
-      });
+      Swal.fire({icon: 'error', title: 'JSON読み込みエラー', text: e.message});
     }
   },
 
@@ -319,10 +407,8 @@ const App = {
           <div class="fw-bold text-truncate small mt-1">${task.title || '無題'}</div>
         </button>`;
       
-      // 安全なイベントリスナー設定 (IDで紐付け)
       const btn = div.querySelector('button');
       btn.onclick = () => App.selectTaskById(task.id);
-      
       list.appendChild(div);
     });
   },
@@ -341,19 +427,16 @@ const App = {
   selectTask: async (task) => {
     State.currentTask = task;
     
-    // UI表示切替
     document.getElementById('emptyState')?.classList.add('d-none');
     document.getElementById('paperArea').classList.remove('d-none');
     document.getElementById('editorToolbar').classList.remove('d-none');
     document.getElementById('currentTaskTitle').innerText = task.title || "無題";
     
-    // キャンバスリセット
     try { App.resetCanvas(); } catch(e) { console.warn(e); }
     
     document.getElementById('worksheetContent').contentEditable = (APP_CONFIG.mode === 'teacher');
     
     UI.showLoading("データを取得中...");
-    
     try {
       const data = await Server.call('loadWorksheetFromDB', task.id);
       
@@ -364,15 +447,14 @@ const App = {
         
         if (APP_CONFIG.mode === 'student') {
           setTimeout(async () => {
-            App.toggleDrawMode(true);
+            App.toggleDrawMode(true); 
             await App.loadMyResponse();
           }, 500);
         }
       } else {
-        // データなし（未作成）の場合
         const info = State.unitData?.unitInfo || {};
         document.getElementById('worksheetContent').innerHTML = `
-          <div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
+          <div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted" style="min-height: 297mm;">
             <div class="ws-header w-100">
               <div>${info.grade || ''} ${info.unitName || ''}</div>
               <div>名前: __________________</div>
@@ -387,7 +469,6 @@ const App = {
           </div>`;
       }
       
-      // ★ 読み込み後に編集機能を有効化
       if(APP_CONFIG.mode === 'teacher') Editor.enableResizing();
 
     } finally {
@@ -422,7 +503,6 @@ const App = {
       const data = await Server.call('loadWorksheetFromDB', taskId);
       
       if (data) {
-        // 画面表示
         document.getElementById('paperArea').classList.remove('d-none');
         document.getElementById('editorToolbar').classList.remove('d-none');
         document.getElementById('emptyState')?.classList.add('d-none');
@@ -431,16 +511,15 @@ const App = {
         document.getElementById('currentTaskTitle').innerText = data.stepTitle;
         document.getElementById('worksheetContent').contentEditable = (APP_CONFIG.mode === 'teacher');
 
-        // データ構造の復元（レガシー互換性確保）
         State.currentTask = {
           id: data.taskId,
           title: data.stepTitle,
-          description: "", // 履歴からは説明文が取れない場合がある
+          description: "",
           canvasData: data.canvasJson,
           rubricHtml: data.rubricHtml,
           ... (data.jsonSource || {})
         };
-        State.currentTask.title = data.stepTitle; // 確実なタイトル
+        State.currentTask.title = data.stepTitle;
 
         State.unitData = {
           unitInfo: { unitName: data.unitName || "復元された単元" },
@@ -456,7 +535,6 @@ const App = {
           }, 500);
         }
         
-        // ★ 履歴展開後も編集機能有効化
         if(APP_CONFIG.mode === 'teacher') Editor.enableResizing();
         
       } else {
@@ -470,7 +548,7 @@ const App = {
     }
   },
 
-  // --- AI Generation ---
+  // --- AI Generation (Preserving Stamps Prompt) ---
 
   generateSingleWorksheet: async (useOcr = false) => {
     if (!State.currentTask) return;
@@ -483,7 +561,7 @@ const App = {
 
       const info = State.unitData?.unitInfo || { grade: "", unitName: "" };
       
-      // プロンプト改善: リッチなヘッダー・フッターを含むHTMLテンプレートを強制
+      // ★ スタンプ対応のプロンプトを維持
       const prompt = `
         あなたは日本の小学校教師です。以下の授業情報から、児童が取り組むためのワークシートのHTML(body内部のみ)を作成してください。
         
@@ -510,29 +588,41 @@ const App = {
            </div>
         </div>
 
-        <!-- 2. タイトル（本文内での重複禁止） -->
+        <!-- 2. タイトル -->
         <h1 style="text-align:center; font-size:1.8em; margin-bottom:30px; border-bottom:1px solid #ddd; padding-bottom:10px;">${State.currentTask.title}</h1>
 
         <!-- 3. 本文エリア（ここをAIが生成） -->
-        <!-- 挨拶文不要。具体的な問いと記述欄(ws-lines, ws-box)を中心に構成 -->
         <div style="min-height: 400px;">
           (ここに学習課題・問い・記述欄を生成。クラス名: ws-box, ws-lines, table table-bordered を活用)
         </div>
 
         <!-- 4. コンパクトフッター（振り返り＆自己評価） -->
         <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px; align-items: start;">
-          <!-- 振り返り (60%) -->
           <div style="flex: 6;">
             <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px; color:#555;">■ ふりかえり</div>
             <div class="ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em; line-height: 1.5em;"></div>
           </div>
-          <!-- 自己評価 (40%) -->
           <div style="flex: 4;">
-            <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px; color:#555;">■ 自己評価</div>
+            <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ 自己評価</div>
             <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center; background:#fff;">
-              <tr><td class="bg-light text-start">わかった・できた</td><td width="60" style="vertical-align:middle;">A B C</td></tr>
-              <tr><td class="bg-light text-start">考えた・表した</td><td style="vertical-align:middle;">A B C</td></tr>
-              <tr><td class="bg-light text-start">進んで学んだ</td><td style="vertical-align:middle;">A B C</td></tr>
+              <tr>
+                <td class="bg-light text-start">わかった・できた</td>
+                <td style="vertical-align:middle; width:120px;">
+                   <span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span>
+                </td>
+              </tr>
+              <tr>
+                <td class="bg-light text-start">考えた・表した</td>
+                <td style="vertical-align:middle;">
+                   <span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span>
+                </td>
+              </tr>
+              <tr>
+                <td class="bg-light text-start">進んで学んだ</td>
+                <td style="vertical-align:middle;">
+                   <span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span>
+                </td>
+              </tr>
             </table>
           </div>
         </div>
@@ -542,11 +632,8 @@ const App = {
       `;
 
       let html = await Server.call('callGeminiAPI', prompt);
-      
-      // クリーニング
       html = App.cleanAIOutput(html);
       
-      // 自動保存
       await Server.call('saveWorksheetToDB', {
         taskId: State.currentTask.id,
         unitName: info.unitName,
@@ -555,7 +642,7 @@ const App = {
         jsonSource: State.currentTask
       });
       
-      App.selectTask(State.currentTask); // 再読み込みして表示
+      App.selectTask(State.currentTask);
       
     } catch (e) {
       console.error(e);
@@ -570,8 +657,8 @@ const App = {
     return text
       .replace(/```html/gi, "")
       .replace(/```/g, "")
-      .replace(/^[\s\S]*?<body[^>]*>/i, "") // bodyタグ以前削除
-      .replace(/<\/body>[\s\S]*$/i, "")     // bodyタグ以降削除
+      .replace(/^[\s\S]*?<body[^>]*>/i, "")
+      .replace(/<\/body>[\s\S]*$/i, "")
       .trim();
   },
 
@@ -593,28 +680,12 @@ const App = {
         UI.updateBatchProgress(Math.round(((i) / queue.length) * 100), `${i + 1} / ${queue.length}: ${task.title}`);
         
         try {
-          // 一括生成用も同様にプロンプトをテンプレート化
           const prompt = `
             あなたは小学校教師です。以下の授業情報からワークシートHTMLを作成してください。
-            
             授業情報: 学年:${info.grade}, 単元:${info.unitName}, タイトル:${task.title}, 活動:${task.description}
             
             【出力HTML構成（厳守）】
-            <!-- 1. ヘッダー -->
-            <div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px;">
-               <div><span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.8em;">${info.grade}</span> <b>${info.unitName}</b></div>
-               <div style="text-align:right;">年 組 番 <b>名前 __________</b></div>
-            </div>
-            
-            <!-- 2. タイトル -->
-            <h1 style="text-align:center; margin-bottom:30px; border-bottom:1px solid #ddd;">${task.title}</h1>
-            
-            <!-- 3. 本文 (ここを生成) -->
-            <div style="min-height: 400px;">
-              (問いと記述欄を生成)
-            </div>
-            
-            <!-- 4. フッター -->
+            <!-- 4. フッター (スタンプ付き) -->
             <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">
               <div style="flex: 6;">
                 <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ ふりかえり</div>
@@ -623,9 +694,18 @@ const App = {
               <div style="flex: 4;">
                 <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ 自己評価</div>
                 <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center;">
-                  <tr><td class="bg-light">わかった・できた</td><td>A B C</td></tr>
-                  <tr><td class="bg-light">考えた・表した</td><td>A B C</td></tr>
-                  <tr><td class="bg-light">進んで学んだ</td><td>A B C</td></tr>
+                  <tr>
+                    <td class="bg-light">わかった・できた</td>
+                    <td style="width:120px;"><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
+                  </tr>
+                  <tr>
+                    <td class="bg-light">考えた・表した</td>
+                    <td><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
+                  </tr>
+                  <tr>
+                    <td class="bg-light">進んで学んだ</td>
+                    <td><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
+                  </tr>
                 </table>
               </div>
             </div>
@@ -644,8 +724,6 @@ const App = {
         } catch (e) {
           console.error(`Task ${task.title} failed:`, e);
         }
-        
-        // Rate Limit回避のための待機
         await new Promise(r => setTimeout(r, 1500));
       }
       
@@ -688,18 +766,41 @@ const App = {
     }
   },
 
-  createPdf: async () => {
+  // ★ New Unified Print Methods (Using Printer object)
+  printCurrentWorksheet: async () => {
     if (!State.currentTask) return;
-    UI.showLoading("PDFを作成しています", "サーバーでレンダリング中...");
+    
+    // 現在のHTMLコンテンツ
+    const html = document.getElementById('worksheetContent').innerHTML;
+    
+    // 現在の手書きキャンバス画像 (高画質)
+    let img = null;
+    if (State.fabricCanvas) {
+      img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
+    }
+    
+    // 統一プリンタへ送信
+    Printer.run([{ html, img }]);
+  },
+
+  startBatchPrint: async () => {
+    const checkboxes = document.querySelectorAll('.task-checkbox:checked');
+    if (checkboxes.length === 0) return Swal.fire('選択なし', '印刷するタスクを選択してください', 'info');
+    
+    const taskIds = Array.from(checkboxes).map(cb => cb.value);
+    UI.showLoading("印刷データを準備中...");
+    
     try {
-      let html = document.getElementById('worksheetContent').innerHTML;
-      // キャンバスを画像化して埋め込み
-      if (State.fabricCanvas) {
-        const img = State.fabricCanvas.toDataURL();
-        html += `<img src="${img}" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:99; pointer-events:none;">`;
-      }
-      const result = await Server.call('createPdf', html, State.currentTask.title);
-      window.open(result.downloadUrl, '_blank');
+      const sheets = await Server.call('getWorksheetsByIds', taskIds);
+      
+      // データをPrinter用に整形
+      const pages = sheets.map(s => ({
+        html: s.htmlContent,
+        img: null // 一括印刷時は現状手書きデータを含めない（必要ならDBから取得して含める）
+      }));
+      
+      Printer.run(pages);
+      
     } finally {
       UI.hideLoading();
     }
@@ -719,6 +820,9 @@ const App = {
     const resp = await Server.call('getMyResponse', State.currentTask.id, State.studentId);
     if (resp) {
       if (resp.canvasJson && State.fabricCanvas) State.fabricCanvas.loadFromJSON(resp.canvasJson);
+      const chk = document.getElementById('isPublicCheck');
+      if(chk) chk.checked = (resp.isPublic === "" || resp.isPublic === true);
+      
       if (resp.feedbackText || resp.status === 'graded') {
         const btn = document.getElementById('btnFeedback');
         if(btn) {
@@ -728,7 +832,6 @@ const App = {
         }
       }
     } else {
-      // Restore Local Draft
       const local = localStorage.getItem(`manabi_${State.currentTask.id}`);
       if (local && State.fabricCanvas) {
         State.fabricCanvas.loadFromJSON(JSON.parse(local).j);
@@ -739,6 +842,8 @@ const App = {
 
   submitStudentResponse: async (status) => {
     const name = document.getElementById('studentNameInput').value;
+    const isPublic = document.getElementById('isPublicCheck').checked;
+    
     if (!name && status === 'submitted') return Swal.fire('名前を入力してください', '', 'warning');
     
     UI.showLoading(status === 'draft' ? "一時保存中..." : "提出しています", "先生にデータを送信中...");
@@ -746,14 +851,26 @@ const App = {
       let img = "";
       if (State.fabricCanvas) img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 0.5 });
       
+      // ★ 自己評価の結果をテキスト化して収集 (スタンプロジック維持)
+      let evalText = "";
+      const rows = document.querySelectorAll('#worksheetContent table tr');
+      rows.forEach(r => {
+        const label = r.querySelector('td:first-child')?.innerText;
+        const activeBtn = r.querySelector('.eval-btn.active');
+        if(label && activeBtn) {
+           evalText += `[${label}: ${activeBtn.innerText}] `;
+        }
+      });
+
       await Server.call('saveStudentResponse', {
         taskId: State.currentTask.id,
         studentId: State.studentId,
         studentName: name || "名無し",
         canvasImage: img,
         canvasJson: JSON.stringify(State.fabricCanvas?.toJSON()),
-        textContent: "",
-        status: status
+        textContent: evalText,
+        status: status,
+        isPublic: isPublic
       });
       
       if (status === 'submitted') localStorage.removeItem(`manabi_${State.currentTask.id}`);
@@ -763,19 +880,125 @@ const App = {
     }
   },
 
+  // --- Plaza (Gallery) Split View Logic ---
+
+  toggleGalleryMode: async (show) => {
+    State.isGalleryMode = show;
+    const workspace = document.getElementById('workspaceContainer');
+    const plaza = document.getElementById('plazaPanel');
+    const btnWork = document.getElementById('btnModeWork');
+    const btnPlaza = document.getElementById('btnModePlaza');
+    
+    if (show) {
+      btnWork.classList.replace('btn-primary', 'btn-light');
+      btnPlaza.classList.replace('btn-light', 'btn-primary');
+      workspace.classList.add('scale-down-mode');
+      plaza.classList.remove('d-none');
+      await App.loadPlazaItems();
+    } else {
+      btnWork.classList.replace('btn-light', 'btn-primary');
+      btnPlaza.classList.replace('btn-primary', 'btn-light');
+      workspace.classList.remove('scale-down-mode');
+      plaza.classList.add('d-none');
+    }
+  },
+
+  loadPlazaItems: async () => {
+    const grid = document.getElementById('plazaGrid');
+    grid.innerHTML = '<div class="text-center w-100 py-5"><div class="spinner-border text-primary"></div></div>';
+    try {
+      const items = await Server.call('getSharedResponses', State.currentTask.id);
+      grid.innerHTML = '';
+      if (!items || items.length === 0) {
+        grid.innerHTML = '<div class="col-12 text-center py-5 text-muted">まだ誰も提出していません</div>';
+      } else {
+        items.forEach(i => {
+          if(i.studentId === State.studentId) return;
+          const col = document.createElement('div');
+          col.className = 'col-6';
+          col.innerHTML = `
+            <div class="card h-100 shadow-sm border-0" style="cursor:pointer; transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+              <div class="bg-light d-flex align-items-center justify-content-center overflow-hidden position-relative" style="aspect-ratio: 210/297;">
+                <img src="${i.canvasImage}" class="img-fluid" style="object-fit:contain;">
+              </div>
+              <div class="card-footer bg-white border-top-0 py-1 px-2 text-center">
+                <small class="fw-bold text-truncate d-block">${i.studentName}</small>
+              </div>
+            </div>`;
+          col.onclick = () => App.openPlazaDetail(i);
+          grid.appendChild(col);
+        });
+      }
+    } catch(e) { grid.innerHTML = 'Error'; }
+  },
+
+  openPlazaDetail: (item) => {
+    State.currentPeerResponse = item;
+    if(!Array.isArray(item.reactions)) item.reactions = [];
+    document.getElementById('plazaGrid').classList.add('d-none');
+    document.getElementById('plazaDetail').classList.remove('d-none');
+    document.getElementById('plazaDetail').classList.add('d-flex');
+    document.getElementById('plazaDetailName').innerText = `${item.studentName} さんの作品`;
+    const myContent = document.getElementById('worksheetContent').innerHTML;
+    document.getElementById('plazaPeerContent').innerHTML = myContent;
+    const cvEl = document.getElementById('plazaPeerCanvas');
+    cvEl.width = 794; cvEl.height = 1123; 
+    if(State.peerCanvas) State.peerCanvas.dispose();
+    State.peerCanvas = new fabric.Canvas('plazaPeerCanvas', { selection: false });
+    if(item.canvasJson) {
+      State.peerCanvas.loadFromJSON(item.canvasJson, () => {
+         State.peerCanvas.forEachObject(o => o.selectable = false);
+         State.peerCanvas.renderAll();
+      });
+    }
+    App.renderPeerReactions(item.reactions);
+  },
+
+  closePlazaDetail: () => {
+    document.getElementById('plazaDetail').classList.add('d-none');
+    document.getElementById('plazaDetail').classList.remove('d-flex');
+    document.getElementById('plazaGrid').classList.remove('d-none');
+    State.currentPeerResponse = null;
+  },
+
+  sendReaction: async (type, value) => {
+    if(!State.currentPeerResponse) return;
+    if(!Array.isArray(State.currentPeerResponse.reactions)) State.currentPeerResponse.reactions = [];
+    const commentInput = document.getElementById('reactionComment');
+    const val = type === 'comment' ? commentInput.value : value;
+    if(!val) return;
+    const tempReaction = { type, value: val, fromName: document.getElementById('studentNameInput').value || '自分' };
+    State.currentPeerResponse.reactions.push(tempReaction);
+    App.renderPeerReactions(State.currentPeerResponse.reactions);
+    if(type === 'comment') commentInput.value = '';
+    await Server.call('savePeerReaction', {
+      taskId: State.currentTask.id,
+      targetResponseId: State.currentPeerResponse.responseId,
+      reaction: tempReaction
+    });
+    UI.toast('送りました！');
+  },
+
+  renderPeerReactions: (list) => {
+    const div = document.getElementById('peerReactionsList');
+    div.innerHTML = '';
+    if(!Array.isArray(list) || list.length === 0) return;
+    list.slice(-5).forEach(r => {
+      const d = document.createElement('div');
+      d.className = 'border-bottom py-1';
+      d.innerHTML = `<span class="fw-bold me-2">${r.fromName}</span> ${r.value}`;
+      div.appendChild(d);
+    });
+  },
+
   // --- Teacher Grading ---
   openGrading: (index) => {
     const s = State.dashboardData[index];
     State.gradingRow = s.rowIndex;
-    
     bootstrap.Modal.getInstance(document.getElementById('dashboardModal')).hide();
-    
     const container = document.getElementById('gradingContainer');
-    // 現在のワークシート背景を表示
     container.innerHTML = `<div id="gradingPaper" class="sheet shadow-sm"><div class="p-5">${document.getElementById('worksheetContent').innerHTML}</div></div><canvas id="gradingCanvas"></canvas>`;
-    
     new bootstrap.Modal(document.getElementById('gradingModal')).show();
-    
     setTimeout(() => {
       const paper = document.getElementById('gradingPaper');
       const cv = document.getElementById('gradingCanvas');
@@ -785,13 +1008,10 @@ const App = {
       cv.style.top = paper.offsetTop + 'px';
       cv.style.left = paper.offsetLeft + 'px';
       cv.style.zIndex = 99;
-      
       const gCanvas = new fabric.Canvas('gradingCanvas', { isDrawingMode: true });
       gCanvas.freeDrawingBrush.width = 3;
-      gCanvas.freeDrawingBrush.color = "red"; // 赤ペン固定
-      
+      gCanvas.freeDrawingBrush.color = "red";
       if (s.canvasJson) gCanvas.loadFromJSON(s.canvasJson);
-      
       State.gradingCanvas = gCanvas;
       document.getElementById('gradingTitle').innerText = `${s.studentName} さんの回答`;
       document.getElementById('feedbackTextInput').value = s.feedbackText || "";
@@ -844,9 +1064,8 @@ const App = {
     new bootstrap.Modal(document.getElementById('shareModal')).show();
   },
 
-  processOcrImport: async () => { /* OCR Logic (Abbreviated for safety) */ },
+  processOcrImport: async () => { /* OCR placeholder */ },
 
-  // Fabric Canvas
   initFabric: () => {
     if (!State.fabricCanvas) {
       const c = document.getElementById('drawCanvas');
@@ -867,45 +1086,38 @@ const App = {
   toggleDrawMode: (forceState) => {
     const newState = (forceState !== undefined) ? forceState : !State.isDrawMode;
     State.isDrawMode = newState;
-    
     const btn = document.getElementById('btnDrawMode');
     const tools = document.getElementById('drawTools');
     const cv = document.getElementById('drawCanvas');
     const pp = document.getElementById('paperArea');
-
     if(btn) btn.classList.replace(newState ? 'btn-outline-dark' : 'btn-dark', newState ? 'btn-dark' : 'btn-outline-dark');
     if(tools) newState ? tools.classList.remove('d-none') : tools.classList.add('d-none');
-
     if (newState) {
       if(cv) {
         cv.classList.remove('d-none');
         cv.style.position = 'absolute'; cv.style.left = '0'; cv.style.top = '0';
         if(pp) { cv.width = pp.offsetWidth; cv.height = pp.offsetHeight; }
       }
-      
       if (!State.fabricCanvas && cv) {
         try { State.fabricCanvas = new fabric.Canvas('drawCanvas', { isDrawingMode: true, freeDrawingBrush: { width: 3, color: '#ff0000' } }); } catch(e){}
       } else if (State.fabricCanvas) {
         State.fabricCanvas.isDrawingMode = true;
       }
-      
       if (State.currentTask?.canvasData && State.fabricCanvas) {
         try { State.fabricCanvas.loadFromJSON(State.currentTask.canvasData); } catch(e){}
       }
-      const wc = document.getElementById('worksheetContent');
-      if(wc) wc.contentEditable = false;
+      document.getElementById('worksheetContent').contentEditable = false;
     } else {
       if (State.fabricCanvas) State.fabricCanvas.isDrawingMode = false;
       const cnt = document.querySelector('.canvas-container');
       if(cnt) cnt.style.pointerEvents = 'none';
-      const wc = document.getElementById('worksheetContent');
-      if(wc) wc.contentEditable = true;
+      document.getElementById('worksheetContent').contentEditable = (APP_CONFIG.mode === 'teacher');
     }
   },
 
   updateBrush: () => { if (State.fabricCanvas) State.fabricCanvas.freeDrawingBrush.color = document.getElementById('penColor').value; },
   clearCanvas: () => { if (State.fabricCanvas) State.fabricCanvas.clear(); },
-  insertImage: (input) => { /* Image Insert Logic (Same as v11.0) */ 
+  insertImage: (input) => {
     if(input.files && input.files[0]){
       const r = new FileReader();
       r.onload = e => {
@@ -961,7 +1173,6 @@ const Editor = {
   currentTarget: null,
 
   init: () => {
-    // 1. Create Context Menu DOM
     const menu = document.createElement('div');
     menu.id = 'ctxMenu';
     menu.className = 'dropdown-menu shadow';
@@ -970,24 +1181,21 @@ const Editor = {
     menu.style.zIndex = '9999';
     document.body.appendChild(menu);
 
-    // 2. Global Event Listeners
     document.addEventListener('contextmenu', (e) => {
-      // ワークシート内のみ反応
       const ws = document.getElementById('worksheetContent');
       if (!ws || !ws.contains(e.target)) return;
+      // Teacher mode check
+      if(document.getElementById('worksheetContent').contentEditable !== "true") return;
 
       e.preventDefault();
       Editor.showContextMenu(e, menu);
     });
 
     document.addEventListener('click', () => menu.style.display = 'none');
-    
-    // 3. Inject Styles for Resizing & Hover
     Editor.enableResizing();
   },
 
   enableResizing: () => {
-    // 既存のスタイルタグがあれば削除して再作成（重複防止）
     const oldStyle = document.getElementById('editor-style');
     if(oldStyle) oldStyle.remove();
 
@@ -996,14 +1204,12 @@ const Editor = {
     style.innerHTML = `
       .ws-box, .ws-lines { 
         resize: vertical; 
-        overflow: hidden; /* ハンドル表示に必須 (visible以外) */
+        overflow: hidden;
         position: relative;
         min-height: 50px;
       }
-      /* 印刷時にハンドルを消す */
       @media print { .ws-box, .ws-lines { resize: none; overflow: visible; } }
       
-      /* 編集モード時の視覚フィードバック */
       #worksheetContent[contenteditable="true"] .ws-box:hover,
       #worksheetContent[contenteditable="true"] .ws-lines:hover,
       #worksheetContent[contenteditable="true"] table:hover {
@@ -1019,7 +1225,6 @@ const Editor = {
     let items = [];
     Editor.currentTarget = t;
 
-    // テーブル操作
     const td = t.closest('td, th');
     if (td) {
       items = [
@@ -1032,16 +1237,12 @@ const Editor = {
         { label: '<i class="bi bi-trash"></i> 行を削除', action: () => Editor.tableAction('delRow', td) },
         { label: '<i class="bi bi-trash"></i> 列を削除', action: () => Editor.tableAction('delCol', td) }
       ];
-    } 
-    // ボックス操作 (.ws-box, .ws-lines)
-    else if (t.classList.contains('ws-box') || t.classList.contains('ws-lines')) {
+    } else if (t.classList.contains('ws-box') || t.classList.contains('ws-lines')) {
       items = [
         { label: '<i class="bi bi-files"></i> ボックスを複製', action: () => Editor.cloneElement(t) },
         { label: '<i class="bi bi-trash"></i> 削除', action: () => t.remove() }
       ];
-    }
-    // 一般テキスト操作
-    else {
+    } else {
       items = [
         { label: '<i class="bi bi-type-bold"></i> 太字', action: () => document.execCommand('bold') },
         { label: '<i class="bi bi-trash"></i> 削除', action: () => t.remove() }
@@ -1050,7 +1251,6 @@ const Editor = {
 
     if (items.length === 0) return;
 
-    // メニュー構築
     menu.innerHTML = '';
     items.forEach(i => {
       if (i.divider) {
@@ -1065,7 +1265,6 @@ const Editor = {
       }
     });
 
-    // 表示位置
     menu.style.left = `${e.pageX}px`;
     menu.style.top = `${e.pageY}px`;
     menu.style.display = 'block';
@@ -1073,7 +1272,7 @@ const Editor = {
 
   tableAction: (type, cell) => {
     const row = cell.parentElement;
-    const table = row.parentElement.parentElement; // thead/tbody -> table
+    const table = row.parentElement.parentElement;
     const rowIndex = row.rowIndex;
     const colIndex = cell.cellIndex;
 
@@ -1081,18 +1280,10 @@ const Editor = {
       case 'addRowUp': table.insertRow(rowIndex); break;
       case 'addRowDown': table.insertRow(rowIndex + 1); break;
       case 'delRow': table.deleteRow(rowIndex); break;
-      case 'addColLeft': 
-        for (let r of table.rows) r.insertCell(colIndex); 
-        break;
-      case 'addColRight': 
-        for (let r of table.rows) r.insertCell(colIndex + 1); 
-        break;
-      case 'delCol': 
-        for (let r of table.rows) r.deleteCell(colIndex); 
-        break;
+      case 'addColLeft': for (let r of table.rows) r.insertCell(colIndex); break;
+      case 'addColRight': for (let r of table.rows) r.insertCell(colIndex + 1); break;
+      case 'delCol': for (let r of table.rows) r.deleteCell(colIndex); break;
     }
-    // 新しいセルの中身を空にするなどの初期化が必要ならここで行う
-    // 簡易的に空セルを追加している
   },
 
   cloneElement: (el) => {
