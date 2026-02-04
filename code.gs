@@ -1,6 +1,6 @@
 /**
- * みらいパスポート v1.8
- * Update: Batch Data Retrieval for Client-Side Printing
+ * みらいパスポート v2.1.1
+ * Update: Launch with Student ID/Name (Phase 2 Integration)
  */
 
 const APP_NAME = "みらいパスポート";
@@ -12,8 +12,14 @@ const DB_NAME = APP_NAME + "_DB";
 
 function doGet(e) {
   const template = HtmlService.createTemplateFromFile('index');
+  
+  // URLパラメータの取得（連携用）
   template.mode = e.parameter.mode || 'teacher'; // teacher | student
   template.taskId = e.parameter.taskId || '';
+  
+  // Phase 2: 自動ログイン用パラメータ
+  template.studentId = e.parameter.studentId || '';     // Compass側で管理しているユニークID
+  template.studentName = e.parameter.studentName || ''; // 児童名
   
   return template.evaluate()
     .setTitle(APP_NAME)
@@ -52,6 +58,7 @@ function performInitialSetup() {
       ss = SpreadsheetApp.create(DB_NAME);
     }
 
+    // DB構造定義
     ensureSheet(ss, 'Worksheets', ['taskId', 'unitName', 'stepTitle', 'htmlContent', 'lastUpdated', 'jsonSource', 'canvasJson', 'rubricHtml', 'isShared']);
     ensureSheet(ss, 'Responses', ['responseId', 'taskId', 'studentId', 'studentName', 'submittedAt', 'canvasImage', 'textContent', 'status', 'feedbackText', 'score', 'feedbackJson', 'canvasJson', 'isPublic', 'reactions']);
 
@@ -153,16 +160,14 @@ function loadWorksheetFromDB(taskId) {
   };
 }
 
-// ★ 一括印刷用データ取得関数 (New)
 function getWorksheetsByIds(taskIds) {
   const sheet = getDbSpreadsheet().getSheetByName('Worksheets');
   const data = sheet.getDataRange().getValues();
   const results = [];
   
-  // Header skip
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (taskIds.includes(String(row[0]))) { // taskId match
+    if (taskIds.includes(String(row[0]))) { 
       results.push({
         taskId: row[0],
         unitName: row[1],
@@ -172,7 +177,6 @@ function getWorksheetsByIds(taskIds) {
       });
     }
   }
-  // リクエスト順序にソート（オプション）
   return results; 
 }
 
