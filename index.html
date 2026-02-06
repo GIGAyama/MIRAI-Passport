@@ -71,7 +71,7 @@
         <? if (mode === 'student') { ?> <span class="badge bg-success ms-2">児童モード</span> <? } ?>
       </a>
       
-      <!-- 児童用モード切替スイッチ -->
+      <!-- 児童用モード切替スイッチ (画面表示切替) -->
       <? if (mode === 'student') { ?>
         <div class="ms-4 d-flex bg-white border rounded-pill p-1 shadow-sm">
            <button id="btnModeWork" class="btn btn-sm btn-primary rounded-pill px-3" onclick="App.toggleGalleryMode(false)">ワークシート</button>
@@ -88,6 +88,13 @@
           <button class="btn btn-outline-secondary btn-sm" onclick="Modals.openImport()">計画</button>
           <button class="btn btn-light text-secondary" onclick="Modals.openSettings()"><i class="bi bi-gear-fill"></i></button>
         <? } else { ?>
+          <!-- コンパス連携用ステータス切替 (SOS/集中/通常) -->
+          <div class="btn-group me-2 shadow-sm" role="group" aria-label="Status Mode">
+            <button type="button" class="btn btn-sm btn-outline-secondary active" id="btnStatusNormal" onclick="App.changeStudentStatus('normal')" title="順調">👍</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" id="btnStatusFocus" onclick="App.changeStudentStatus('focus')" title="集中">🔥</button>
+            <button type="button" class="btn btn-sm btn-outline-warning" id="btnStatusSos" onclick="App.changeStudentStatus('sos')" title="SOS">🆘</button>
+          </div>
+
           <!-- プライバシー設定 -->
           <div class="form-check form-switch me-3" title="広場に公開するかどうか">
             <input class="form-check-input" type="checkbox" id="isPublicCheck" checked>
@@ -224,7 +231,36 @@
   <div class="modal fade" id="gradingModal" tabindex="-1"><div class="modal-dialog modal-fullscreen"><div class="modal-content"><div class="modal-header bg-dark text-white"><h5 class="modal-title" id="gradingTitle">添削</h5><button class="btn btn-light btn-sm ms-auto me-2" onclick="App.saveGrading()">返却</button><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body p-0 d-flex justify-content-center bg-secondary"><div id="gradingContainer" class="sheet-container m-4 scale-down"></div></div><div class="modal-footer"><input type="text" id="feedbackTextInput" class="form-control" placeholder="コメント..."></div></div></div></div>
   <div class="modal fade" id="rubricModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header bg-warning bg-opacity-10"><h5 class="modal-title">評価基準</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="rubricContainer" class="p-3 border rounded bg-light mb-3" contenteditable="true" style="min-height: 200px;"></div></div><div class="modal-footer"><button class="btn btn-warning rounded-pill me-auto" onclick="App.generateRubric()">AI作成</button><button class="btn btn-primary" onclick="App.saveRubric()">保存</button></div></div></div></div>
   <div class="modal fade" id="shareModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">配布URL</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="input-group"><input type="text" id="shareUrlInput" class="form-control" readonly><button class="btn btn-outline-secondary" onclick="navigator.clipboard.writeText(document.getElementById('shareUrlInput').value)"><i class="bi bi-clipboard"></i></button></div></div></div></div></div>
-  <div class="modal fade" id="settingsModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">設定</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label>API Key</label><input type="password" id="apiKeyInput" class="form-control"></div><div class="mb-3"><label>Name</label><input type="text" id="teacherNameInput" class="form-control"></div></div><div class="modal-footer"><button class="btn btn-primary" onclick="App.saveSettings()">保存</button></div></div></div></div>
+  
+  <div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">設定</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label>API Key</label>
+            <input type="password" id="apiKeyInput" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label>Name</label>
+            <input type="text" id="teacherNameInput" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label>Compass URL</label>
+            <input type="url" id="compassUrlInput" class="form-control" placeholder="https://script.google.com/...">
+            <div class="form-text small">みらいコンパスのWebアプリURLを入力すると連携できます</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" onclick="App.saveSettings()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal fade" id="importModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">計画読込</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><textarea id="jsonInput" class="form-control font-monospace mb-3" rows="10"></textarea><button class="btn btn-outline-secondary btn-sm" onclick="App.loadSampleJson()">サンプル</button></div><div class="modal-footer"><button class="btn btn-primary" onclick="App.processImport()">解析</button></div></div></div></div>
   <div class="modal fade" id="pdfImportModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">資料読込</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="file" id="ocrFileInput" class="form-control" accept="application/pdf,image/*"></div><div class="modal-footer"><button class="btn btn-primary" onclick="App.processOcrImport()">解析</button></div></div></div></div>
 
