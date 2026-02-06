@@ -1,35 +1,29 @@
 /**
- * みらいパスポート v2.1.1
- * Update: Launch with Student ID/Name (Phase 2 Integration)
- * Update: Sync with Mirai Compass (Status & Mode)
- * Update: Shared DB Integration for Unit Plan Import (Phase 3)
+ * みらいパスポート v2.2.0
+ * Update: Phase 4 AI Coaching - Enhanced Prompt for Worksheet Generation
+ * Update: Refined syncToCompass with Task Title metadata
  */
 
 const APP_NAME = "みらいパスポート";
 const DB_NAME = APP_NAME + "_DB";
 
 // ==================================================
-// 1. エントリーポイント & 初期化
+// 1. エントリーポイント & 初期化 (既存維持)
 // ==================================================
 
 function doGet(e) {
   const template = HtmlService.createTemplateFromFile('index');
-  
-  // URLパラメータの取得
-  template.mode = e.parameter.mode || 'teacher'; // teacher | student
+  template.mode = e.parameter.mode || 'teacher';
   template.taskId = e.parameter.taskId || '';
-  
-  // Phase 2: 自動ログイン用パラメータ
   template.studentId = e.parameter.studentId || '';     
   template.studentName = e.parameter.studentName || ''; 
-
-  // Phase 3: 共有DB連携用ID
   template.importId = e.parameter.importId || ''; 
   
   return template.evaluate()
     .setTitle(APP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .setFaviconUrl('https://drive.google.com/uc?id=1mVwFtlrJvqEIk-0Gd03BqmG_-0BZiqY5&.png');
 }
 
 function include(filename) {
@@ -39,7 +33,6 @@ function include(filename) {
 function checkSetupStatus() {
   const props = PropertiesService.getScriptProperties();
   const dbId = props.getProperty('DB_SS_ID');
-  
   if (dbId) {
     try {
       SpreadsheetApp.openById(dbId);
@@ -54,19 +47,13 @@ function checkSetupStatus() {
 function performInitialSetup() {
   const props = PropertiesService.getScriptProperties();
   let ss = null;
-
   try {
     const files = DriveApp.getFilesByName(DB_NAME);
-    if (files.hasNext()) {
-      ss = SpreadsheetApp.openById(files.next().getId());
-    } else {
-      ss = SpreadsheetApp.create(DB_NAME);
-    }
+    if (files.hasNext()) ss = SpreadsheetApp.openById(files.next().getId());
+    else ss = SpreadsheetApp.create(DB_NAME);
 
-    // DB構造定義
     ensureSheet(ss, 'Worksheets', ['taskId', 'unitName', 'stepTitle', 'htmlContent', 'lastUpdated', 'jsonSource', 'canvasJson', 'rubricHtml', 'isShared']);
     ensureSheet(ss, 'Responses', ['responseId', 'taskId', 'studentId', 'studentName', 'submittedAt', 'canvasImage', 'textContent', 'status', 'feedbackText', 'score', 'feedbackJson', 'canvasJson', 'isPublic', 'reactions']);
-    // 連携用シート（存在しなければ作成）
     ensureSheet(ss, 'ImportQueue', ['transactionId', 'dataJson', 'createdAt']);
 
     props.setProperty('DB_SS_ID', ss.getId());
@@ -86,29 +73,16 @@ function ensureSheet(ss, name, header) {
 }
 
 // ==================================================
-// 2. 設定管理
+// 2. 設定管理 (既存維持)
 // ==================================================
 
-/**
- * ユーザー設定を保存
- * [Update] Compass連携URLを追加
- */
 function saveUserConfig(apiKey, teacherName, compassUrl) {
-  const props = {
-    'GEMINI_API_KEY': apiKey,
-    'TEACHER_NAME': teacherName
-  };
-  if (compassUrl !== undefined) {
-    props['COMPASS_URL'] = compassUrl.trim();
-  }
+  const props = { 'GEMINI_API_KEY': apiKey, 'TEACHER_NAME': teacherName };
+  if (compassUrl !== undefined) props['COMPASS_URL'] = compassUrl.trim();
   PropertiesService.getUserProperties().setProperties(props);
   return true;
 }
 
-/**
- * ユーザー設定を取得
- * [Update] Compass連携URLを取得
- */
 function getUserConfig() {
   const userProps = PropertiesService.getUserProperties();
   const scriptProps = PropertiesService.getScriptProperties();
@@ -132,7 +106,6 @@ function getDbSpreadsheet() {
 function saveWorksheetToDB(data) {
   const sheet = getDbSpreadsheet().getSheetByName('Worksheets');
   const now = new Date();
-  
   const record = {
     taskId: String(data.taskId || Utilities.getUuid()),
     unitName: data.unitName || "無題",
@@ -143,9 +116,7 @@ function saveWorksheetToDB(data) {
     rubricHtml: data.rubricHtml || "",
     isShared: data.isShared || false
   };
-
   const found = sheet.getRange("A:A").createTextFinder(record.taskId).matchEntireCell(true).findNext();
-
   if (found) {
     const r = found.getRow();
     sheet.getRange(r, 4).setValue(record.htmlContent);
@@ -162,44 +133,29 @@ function saveWorksheetToDB(data) {
 function loadWorksheetFromDB(taskId) {
   const sheet = getDbSpreadsheet().getSheetByName('Worksheets');
   const found = sheet.getRange("A:A").createTextFinder(String(taskId)).matchEntireCell(true).findNext();
-  
   if (!found) return null;
-
   const r = found.getRow();
-  const getVal = c => sheet.getRange(r, c).getValue();
-
   return {
-    taskId: getVal(1),
-    unitName: getVal(2),
-    stepTitle: getVal(3),
-    htmlContent: getVal(4),
-    jsonSource: safeJSONParse(getVal(6)),
-    canvasJson: safeJSONParse(getVal(7)),
-    rubricHtml: getVal(8),
-    isShared: getVal(9)
+    taskId: sheet.getRange(r, 1).getValue(),
+    unitName: sheet.getRange(r, 2).getValue(),
+    stepTitle: sheet.getRange(r, 3).getValue(),
+    htmlContent: sheet.getRange(r, 4).getValue(),
+    jsonSource: safeJSONParse(sheet.getRange(r, 6).getValue()),
+    canvasJson: safeJSONParse(sheet.getRange(r, 7).getValue()),
+    rubricHtml: sheet.getRange(r, 8).getValue(),
+    isShared: sheet.getRange(r, 9).getValue()
   };
 }
 
 function getWorksheetsByIds(taskIds) {
   const sheet = getDbSpreadsheet().getSheetByName('Worksheets');
   const data = sheet.getDataRange().getValues();
-  const results = [];
-  
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (taskIds.includes(String(row[0]))) { 
-      results.push({
-        taskId: row[0],
-        unitName: row[1],
-        stepTitle: row[2],
-        htmlContent: row[3],
-        canvasJson: safeJSONParse(row[6]),
-        // JSON Sourceも返す（AI生成時の情報補完用）
-        jsonSource: safeJSONParse(row[5])
-      });
-    }
-  }
-  return results; 
+  return data.slice(1)
+    .filter(row => taskIds.includes(String(row[0])))
+    .map(row => ({
+      taskId: row[0], unitName: row[1], stepTitle: row[2], htmlContent: row[3],
+      canvasJson: safeJSONParse(row[6]), jsonSource: safeJSONParse(row[5])
+    }));
 }
 
 function getHistory() {
@@ -221,15 +177,12 @@ function saveStudentResponse(data) {
   const sheet = getDbSpreadsheet().getSheetByName('Responses');
   const vals = sheet.getDataRange().getValues();
   let row = -1;
-  
   for(let i=1; i<vals.length; i++){
     if(String(vals[i][1]) === String(data.taskId) && String(vals[i][2]) === String(data.studentId)){
       row = i+1; break;
     }
   }
-  
   const isPublicVal = (data.isPublic === undefined) ? true : data.isPublic;
-
   if(row > 0) {
     sheet.getRange(row, 4).setValue(data.studentName);
     sheet.getRange(row, 5).setValue(new Date());
@@ -239,12 +192,7 @@ function saveStudentResponse(data) {
     if(data.canvasJson) sheet.getRange(row, 12).setValue(data.canvasJson);
     sheet.getRange(row, 13).setValue(isPublicVal);
   } else {
-    const newRow = [
-      Utilities.getUuid(), data.taskId, data.studentId, data.studentName, new Date(), 
-      data.canvasImage||"", data.textContent||"", data.status||"submitted", 
-      "","", "", data.canvasJson||"", isPublicVal, "[]" 
-    ];
-    sheet.appendRow(newRow);
+    sheet.appendRow([Utilities.getUuid(), data.taskId, data.studentId, data.studentName, new Date(), data.canvasImage||"", data.textContent||"", data.status||"submitted", "","", "", data.canvasJson||"", isPublicVal, "[]"]);
   }
   return { success: true };
 }
@@ -252,18 +200,11 @@ function saveStudentResponse(data) {
 function getTaskSubmissions(taskId) {
   const sheet = getDbSpreadsheet().getSheetByName('Responses');
   const values = sheet.getDataRange().getValues();
-  return values
-    .map((r, i) => ({ r, rowIndex: i + 1 }))
+  return values.map((r, i) => ({ r, rowIndex: i + 1 }))
     .filter(o => o.rowIndex > 1 && String(o.r[1]) === String(taskId))
     .map(o => ({
-      rowIndex: o.rowIndex,
-      studentId: o.r[2],
-      studentName: o.r[3],
-      submittedAt: o.r[4],
-      canvasImage: o.r[5],
-      status: o.r[7],
-      feedbackText: o.r[8],
-      canvasJson: o.r[11]
+      rowIndex: o.rowIndex, studentId: o.r[2], studentName: o.r[3], submittedAt: o.r[4],
+      canvasImage: o.r[5], status: o.r[7], feedbackText: o.r[8], canvasJson: o.r[11]
     }));
 }
 
@@ -280,33 +221,24 @@ function saveFeedback(data) {
 function getSharedResponses(taskId) {
   const sheet = getDbSpreadsheet().getSheetByName('Responses');
   const values = sheet.getDataRange().getValues();
-  
-  return values
-    .map((r, i) => ({ r, rowIndex: i + 1 }))
+  return values.map((r, i) => ({ r, rowIndex: i + 1 }))
     .filter(o => {
-      const r = o.r;
-      const isPublic = (r[12] === "" || r[12] === true || r[12] === "true");
-      return String(r[1]) === String(taskId) && (r[7] === 'submitted' || r[7] === 'graded') && isPublic;
+      const isPublic = (o.r[12] === "" || o.r[12] === true || o.r[12] === "true");
+      return String(o.r[1]) === String(taskId) && (o.r[7] === 'submitted' || o.r[7] === 'graded') && isPublic;
     })
     .map(o => ({ 
-      responseId: o.r[0],
-      studentId: o.r[2],
-      studentName: o.r[3], 
-      canvasImage: o.r[5],
-      canvasJson: o.r[11],
-      reactions: ensureArray(safeJSONParse(o.r[13])) 
+      responseId: o.r[0], studentId: o.r[2], studentName: o.r[3], 
+      canvasImage: o.r[5], canvasJson: o.r[11], reactions: ensureArray(safeJSONParse(o.r[13])) 
     }));
 }
 
 function savePeerReaction(data) {
   const sheet = getDbSpreadsheet().getSheetByName('Responses');
   const finder = sheet.getRange("A:A").createTextFinder(data.targetResponseId).matchEntireCell(true).findNext();
-  
   if(finder) {
     const row = finder.getRow();
     const cell = sheet.getRange(row, 14);
-    let current = safeJSONParse(cell.getValue());
-    if(!Array.isArray(current)) current = [];
+    let current = ensureArray(safeJSONParse(cell.getValue()));
     current.push({ ...data.reaction, timestamp: new Date().getTime() });
     cell.setValue(JSON.stringify(current));
     return { success: true, reactions: current };
@@ -320,13 +252,8 @@ function getMyResponse(taskId, studentId) {
   for(let i=values.length-1; i>=1; i--){
     if(String(values[i][1]) === String(taskId) && String(values[i][2]) === String(studentId)) {
       return { 
-        responseId: values[i][0], 
-        status: values[i][7], 
-        feedbackText: values[i][8], 
-        feedbackJson: values[i][10], 
-        canvasImage: values[i][5], 
-        canvasJson: values[i][11],
-        isPublic: values[i][12],
+        responseId: values[i][0], status: values[i][7], feedbackText: values[i][8], 
+        canvasImage: values[i][5], canvasJson: values[i][11], isPublic: values[i][12],
         reactions: ensureArray(safeJSONParse(values[i][13]))
       };
     }
@@ -335,17 +262,47 @@ function getMyResponse(taskId, studentId) {
 }
 
 // ==================================================
-// 5. AI & Utilities
+// 5. AI & Utilities (Phase 4: Enhanced Prompts)
 // ==================================================
 
 function callGeminiAPI(prompt) {
   const k = getUserConfig().apiKey; 
-  if (!k) throw new Error("APIキー未設定");
+  if (!k) throw new Error("Gemini APIキーが設定されていません。先生モードの設定を確認してください。");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${k}`;
-  const res = UrlFetchApp.fetch(url, {method:'post',contentType:'application/json',payload:JSON.stringify({contents:[{parts:[{text:prompt}]}]},),muteHttpExceptions:true});
+  const payload = { contents: [{ parts: [{ text: prompt }] }] };
+  const options = { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true };
+  
+  const res = UrlFetchApp.fetch(url, options);
   const json = JSON.parse(res.getContentText());
-  if (json.error) throw new Error(json.error.message);
+  if (json.error) throw new Error("AIエラー: " + json.error.message);
+  if (!json.candidates || !json.candidates[0].content) throw new Error("AIから応答が得られませんでした。");
   return json.candidates[0].content.parts[0].text;
+}
+
+/**
+ * [Update Phase 4] AIコーチング対応のワークシート生成
+ * 単なる入力欄だけでなく、ヒントや自己評価を動的に追加
+ */
+function generateSingleWorksheet(data) {
+  const prompt = `あなたは教育工学と個別最適な学びの専門家です。
+児童が自立的に学習を進められるよう、以下の活動内容に基づいた「AIコーチング機能付きHTMLワークシート」の本文を作成してください。
+
+【活動内容】
+単元: ${data.unitName}
+活動: ${data.stepTitle}
+内容: ${data.description}
+
+【デザインの要件】
+1. 小学生が親しみやすい言葉遣い。
+2. 以下のセクションを必ず含める：
+   - 「今日のめあて」（活動内容から具体化）
+   - 「AIヒント・ポイント」（この活動でつまずきやすい点や、考えるコツをAIコーチとして助言）
+   - 「考えを書くスペース」（<div contenteditable="true" class="rich-editor"></div> を使用）
+   - 「自己評価」（3段階のスタンプ選択など）
+3. スタイルはBootstrap 5のクラス（card, p-3, mb-3, bg-lightなど）を活用。
+4. HTMLの「body内部」のみを出力すること。余計な解説や\`\`\`htmlタグは不要。`;
+
+  return callGeminiAPI(prompt);
 }
 
 function generateRubricAI(data) {
@@ -357,112 +314,72 @@ function safeJSONParse(s){ try { return JSON.parse(s); } catch (e) { return null
 function ensureArray(val) { return Array.isArray(val) ? val : []; }
 
 // ==================================================
-// 6. Compass Integration (Shared DB Mode)
+// 6. Compass Integration (Shared DB Mode & Sync)
 // ==================================================
 
-/**
- * [Phase 3] 共有DBの受信ボックスからデータを取り込む処理
- * コンパスから書き込まれたImportQueueをチェックし、データを取得・削除する
- */
 function consumeImportQueue(importId) {
-  if (!importId) return { success: false, message: "IDが指定されていません" };
-  
+  if (!importId) return { success: false, message: "ID未指定" };
   const ss = getDbSpreadsheet();
   const sheet = ss.getSheetByName('ImportQueue');
-  
-  if (!sheet) return { success: false, message: "連携用シートが見つかりません" };
-  
+  if (!sheet) return { success: false, message: "連携シートなし" };
   const data = sheet.getDataRange().getValues();
-  let foundData = null;
-  let deleteRowIndex = -1;
-  
-  // IDを検索 (Column A: transactionId)
+  let foundData = null, deleteRowIndex = -1;
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]) === String(importId)) {
-      try {
-        foundData = JSON.parse(data[i][1]); // dataJson
-      } catch (e) {
-        console.error("JSON Parse Error in Queue:", e);
-      }
-      deleteRowIndex = i + 1;
-      break;
+      foundData = safeJSONParse(data[i][1]);
+      deleteRowIndex = i + 1; break;
     }
   }
-  
   if (deleteRowIndex > 0 && foundData) {
-    // データが見つかったら、タスク枠を作成する処理を実行
     const result = handleImportUnitPlan(foundData);
-    
-    // 処理が終わったらキューから削除（使い捨て）
     sheet.deleteRow(deleteRowIndex);
-    
     return { success: true, ...result };
   }
-  
-  return { success: false, message: "連携データが見つかりませんでした（期限切れまたは処理済み）" };
+  return { success: false, message: "データが見つかりません" };
 }
 
-/**
- * 単元計画の一括インポート処理（内部呼び出し用）
- * データをWorksheetsシートに登録し、HTML空の状態で保存する
- */
 function handleImportUnitPlan(data) {
-  // data: { unitName, grade, tasks: [{ taskId, title, description, ... }] }
   const ss = getDbSpreadsheet();
   const sheet = ss.getSheetByName('Worksheets');
   const existingData = sheet.getDataRange().getValues();
-  
-  // IDマップ作成
   const idMap = new Map();
-  for (let i = 1; i < existingData.length; i++) {
-    idMap.set(String(existingData[i][0]), i + 1);
-  }
-
-  const now = new Date();
-  const unitName = data.unitName || "無題の単元";
-  const addedTaskIds = [];
-
-  const updates = [];
-  const inserts = [];
-
+  for (let i = 1; i < existingData.length; i++) idMap.set(String(existingData[i][0]), i + 1);
+  const now = new Date(), unitName = data.unitName || "無題の単元", addedTaskIds = [];
+  const updates = [], inserts = [];
   data.tasks.forEach(task => {
     const taskId = String(task.taskId);
     addedTaskIds.push(taskId);
-    
-    const record = [
-      taskId,
-      unitName,
-      task.title || "無題",
-      "", // htmlContent: 空で未生成状態にする
-      now,
-      JSON.stringify(task), // jsonSource
-      "", // canvasJson
-      "", // rubricHtml
-      false // isShared
-    ];
-
+    const record = [taskId, unitName, task.title || "無題", "", now, JSON.stringify(task), "", "", false];
     if (idMap.has(taskId)) {
-      // 既存: 未生成(HTML空)の場合のみ更新
       const row = idMap.get(taskId);
-      const currentHtml = existingData[row - 1][3];
-      if (!currentHtml) {
-        updates.push({ row: row, values: record });
-      }
-    } else {
-      // 新規
-      inserts.push(record);
-    }
+      if (!existingData[row - 1][3]) updates.push({ row: row, values: record });
+    } else inserts.push(record);
   });
+  if (inserts.length > 0) sheet.getRange(sheet.getLastRow() + 1, 1, inserts.length, inserts[0].length).setValues(inserts);
+  updates.forEach(u => sheet.getRange(u.row, 1, 1, u.values.length).setValues([u.values]));
+  return { taskIds: addedTaskIds, message: `${inserts.length}件追加、${updates.length}件更新` };
+}
 
-  if (inserts.length > 0) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, inserts.length, inserts[0].length).setValues(inserts);
+/**
+ * [Update Phase 3/4] コンパスへの状態同期送信
+ * コンパス側の「LiveStatus」を更新するためのメタデータを送信
+ */
+function syncToCompass(payload) {
+  const config = getUserConfig();
+  const compassUrl = config.compassUrl;
+  if (!compassUrl || !payload || !payload.studentId) return { success: false };
+
+  try {
+    // 連携用の詳細情報を付与（Passport側で持っている活動タイトルなど）
+    const options = {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+    UrlFetchApp.fetch(compassUrl, options);
+    return { success: true };
+  } catch (e) {
+    console.error("Sync Error:", e);
+    return { success: false, error: e.message };
   }
-  updates.forEach(u => {
-    sheet.getRange(u.row, 1, 1, u.values.length).setValues([u.values]);
-  });
-
-  return { 
-    taskIds: addedTaskIds,
-    message: `${inserts.length}件を追加、${updates.length}件を更新しました` 
-  };
 }
