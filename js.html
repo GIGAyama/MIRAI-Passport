@@ -2,6 +2,8 @@
 /**
  * みらいパスポート v2.1.1
  * Update: Auto-Login from URL (Phase 2 Integration)
+ * Update: Compass Integration (Status Sync & Mode Change)
+ * Update: Auto-Generation Wizard from Compass (Phase 3)
  * Keeps all previous features (Stamps, Plaza, Edit Lock) intact.
  */
 
@@ -320,6 +322,9 @@ const App = {
         document.getElementById('appContainer').classList.remove('d-none');
         App.loadConfig();
         Editor.init();
+        
+        // [New] Compass連携: 自動生成チェック (パラメータがある場合)
+        setTimeout(App.checkAutoGenerate, 800);
       } else {
         UI.hideLoading();
         document.getElementById('setupWizard').classList.remove('d-none');
@@ -351,6 +356,10 @@ const App = {
     const config = await Server.call('getUserConfig');
     document.getElementById('apiKeyInput').value = config.apiKey;
     document.getElementById('teacherNameInput').value = config.teacherName;
+    // Compass URLの設定（あれば）
+    const urlInput = document.getElementById('compassUrlInput');
+    if (urlInput) urlInput.value = config.compassUrl || '';
+    
     UI.hideLoading();
     App.loadHistory();
   },
@@ -358,10 +367,127 @@ const App = {
   saveSettings: async () => {
     await Server.call('saveUserConfig',
       document.getElementById('apiKeyInput').value,
-      document.getElementById('teacherNameInput').value
+      document.getElementById('teacherNameInput').value,
+      document.getElementById('compassUrlInput')?.value || '' // Compass URL
     );
     UI.toast('設定を保存しました');
     bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+  },
+
+  // --- Compass Integration (Teacher: Auto-Generate Wizard) ---
+  
+  checkAutoGenerate: async () => {
+    // URLパラメータのチェック
+    const params = new URLSearchParams(window.location.search);
+    const taskIdsStr = params.get('taskIds');
+    
+    if (!taskIdsStr) return; // パラメータがなければ終了
+    
+    const taskIds = taskIdsStr.split(',').filter(id => id);
+    if (taskIds.length === 0) return;
+
+    UI.showLoading("連携データを確認中...", "単元計画を読み込んでいます");
+    try {
+      // 該当するタスク情報をDBから取得
+      const sheets = await Server.call('getWorksheetsByIds', taskIds);
+      
+      // htmlContentが空のタスク（＝未生成）を抽出
+      const unfinishedTasks = sheets.filter(s => !s.htmlContent || s.htmlContent.trim() === "");
+      
+      if (unfinishedTasks.length > 0) {
+        // unitDataの構成（生成処理で必要）
+        const sample = unfinishedTasks[0];
+        // 既存のunitDataが空なら補完
+        if (!State.unitData) {
+           State.unitData = {
+             unitInfo: { unitName: sample.unitName || "連携単元" },
+             tasks: unfinishedTasks.map(t => ({
+               id: t.taskId,
+               title: t.stepTitle,
+               description: "" // 詳細なdescriptionはDBにJSONとして保存されている
+             }))
+           };
+        }
+
+        Swal.fire({
+          title: 'ワークシート作成',
+          text: `コンパスから連携された ${unfinishedTasks.length} 件の未作成ワークシートがあります。AIで一括生成しますか？`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '生成を開始する',
+          cancelButtonText: 'あとで'
+        }).then(async (result) => {
+          if (result.isConfirmed) {
+            // 詳細データをロードしてから生成へ
+            await App.startBatchGeneration(unfinishedTasks.map(t => t.taskId));
+          } else {
+            // URLパラメータを削除してリロード（再通知防止）
+            const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?mode=teacher";
+            window.history.pushState({path:newUrl},'',newUrl);
+          }
+        });
+      } else {
+        UI.toast('すべてのワークシートは作成済みです', 'info');
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?mode=teacher";
+        window.history.pushState({path:newUrl},'',newUrl);
+      }
+    } catch(e) {
+      console.error("Auto Gen Check Failed", e);
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+  // --- Compass Integration (Student: Status Sync) ---
+
+  changeStudentStatus: (mode) => {
+    // UIのトグル処理
+    ['normal', 'focus', 'sos'].forEach(m => {
+      const btn = document.getElementById(`btnStatus${m.charAt(0).toUpperCase() + m.slice(1)}`);
+      if(btn) {
+         if (m === mode) {
+            btn.classList.add('active');
+            // 塗りつぶしスタイルへの変更
+            const baseClass = m === 'normal' ? 'secondary' : (m === 'focus' ? 'danger' : 'warning');
+            btn.classList.remove(`btn-outline-${baseClass}`);
+            btn.classList.add(`btn-${baseClass}`);
+         } else {
+            btn.classList.remove('active');
+            // アウトラインスタイルに戻す
+            const baseClass = m === 'normal' ? 'secondary' : (m === 'focus' ? 'danger' : 'warning');
+            btn.classList.add(`btn-outline-${baseClass}`);
+            btn.classList.remove(`btn-${baseClass}`);
+         }
+      }
+    });
+    
+    // Compassへ通知
+    App.notifyCompass('syncMode', { mode: mode });
+    UI.toast(mode === 'sos' ? 'SOSを発信しました' : 'ステータスを変更しました', 'info');
+  },
+
+  notifyCompass: async (action, data = {}) => {
+    if (APP_CONFIG.mode !== 'student' || !State.studentId) return;
+    
+    // 現在のタスク情報
+    const taskId = State.currentTask?.id || APP_CONFIG.taskId;
+    const taskTitle = State.currentTask?.title || document.getElementById('currentTaskTitle').innerText;
+
+    const payload = {
+      action: action,
+      studentId: State.studentId,
+      studentName: document.getElementById('studentNameInput').value || APP_CONFIG.studentName,
+      taskId: taskId,
+      taskTitle: taskTitle,
+      ...data
+    };
+
+    // 非同期で送信（Fire-and-forget: 結果を待たずにUI操作を継続させる）
+    Server.call('syncToCompass', payload).then(res => {
+      if (!res.success && res.message) {
+         console.warn("Compass Sync Warning:", res.message);
+      }
+    }).catch(e => console.error("Compass Sync Failed:", e));
   },
 
   // --- Data Management ---
@@ -463,6 +589,8 @@ const App = {
           setTimeout(async () => {
             App.toggleDrawMode(true); 
             await App.loadMyResponse();
+            // Compass連携: 着手ステータス通知
+            App.notifyCompass('syncStatus', { status: '途中' });
           }, 500);
         }
       } else {
@@ -546,6 +674,8 @@ const App = {
           setTimeout(async () => {
             App.toggleDrawMode(true);
             await App.loadMyResponse();
+            // Compass連携: 着手ステータス通知
+            App.notifyCompass('syncStatus', { status: '途中' });
           }, 500);
         }
         
@@ -676,17 +806,43 @@ const App = {
       .trim();
   },
 
-  startBatchGeneration: async () => {
-    const checkboxes = document.querySelectorAll('.task-checkbox:checked');
-    if (checkboxes.length === 0) return Swal.fire('選択なし', '生成するタスクを選択してください', 'info');
+  // [Update] targetTaskIds を受け取れるように改修
+  startBatchGeneration: async (targetTaskIds = null) => {
+    let queue = [];
+    
+    if (targetTaskIds && Array.isArray(targetTaskIds)) {
+      // IDリストが渡された場合、DBから詳細をロードしてキューに追加
+      for (const tid of targetTaskIds) {
+        // DBからロード（同期的に待機）
+        const data = await Server.call('loadWorksheetFromDB', tid);
+        if (data) {
+          queue.push({
+            id: data.taskId,
+            title: data.stepTitle,
+            // description が空だとAIが困るので、jsonSourceがあれば復元
+            description: (data.jsonSource && data.jsonSource.description) ? data.jsonSource.description : data.stepTitle,
+            unitName: data.unitName,
+            jsonSource: data.jsonSource // AI生成時にそのまま渡せるように保持
+          });
+        }
+      }
+    } else {
+      // 既存ロジック（チェックボックスから）
+      const checkboxes = document.querySelectorAll('.task-checkbox:checked');
+      if (checkboxes.length === 0) return Swal.fire('選択なし', '生成するタスクを選択してください', 'info');
+      queue = Array.from(checkboxes).map(cb => State.unitData.tasks.find(t => t.id === cb.value));
+    }
 
-    const queue = Array.from(checkboxes).map(cb => State.unitData.tasks.find(t => t.id === cb.value));
+    if (queue.length === 0) return;
+    
     if (!confirm(`${queue.length}件のワークシートを一括生成しますか？`)) return;
 
     UI.showLoading("一括生成を開始します", "しばらくそのままお待ちください...");
     UI.toggleBatchProgress(true);
     
-    const info = State.unitData.unitInfo;
+    // unitInfoの補完
+    const unitName = (State.unitData?.unitInfo?.unitName) || (queue[0].unitName) || "単元";
+    const grade = (State.unitData?.unitInfo?.grade) || "学年";
 
     try {
       for (let i = 0; i < queue.length; i++) {
@@ -696,7 +852,7 @@ const App = {
         try {
           const prompt = `
             あなたは小学校教師です。以下の授業情報からワークシートHTMLを作成してください。
-            授業情報: 学年:${info.grade}, 単元:${info.unitName}, タイトル:${task.title}, 活動:${task.description}
+            授業情報: 学年:${grade}, 単元:${unitName}, タイトル:${task.title}, 活動:${task.description}
             
             【出力HTML構成（厳守）】
             <!-- 4. フッター (スタンプ付き) -->
@@ -714,11 +870,11 @@ const App = {
                   </tr>
                   <tr>
                     <td class="bg-light">考えた・表した</td>
-                    <td><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
+                    <td style="width:120px;"><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
                   </tr>
                   <tr>
                     <td class="bg-light">進んで学んだ</td>
-                    <td><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
+                    <td style="width:120px;"><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
                   </tr>
                 </table>
               </div>
@@ -728,12 +884,15 @@ const App = {
           let html = await Server.call('callGeminiAPI', prompt);
           html = App.cleanAIOutput(html);
           
+          // jsonSourceの更新用（なければ最低限の情報で作成）
+          const jsonSrc = task.jsonSource || { id: task.id, title: task.title, description: task.description };
+
           await Server.call('saveWorksheetToDB', {
             taskId: task.id,
-            unitName: info.unitName,
+            unitName: unitName,
             stepTitle: task.title,
             htmlContent: html,
-            jsonSource: task
+            jsonSource: jsonSrc
           });
         } catch (e) {
           console.error(`Task ${task.title} failed:`, e);
@@ -744,6 +903,12 @@ const App = {
       UI.updateBatchProgress(100, '完了');
       App.loadHistory();
       UI.toast('一括生成が完了しました');
+      
+      // URLパラメータの掃除
+      if (targetTaskIds) {
+         const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?mode=teacher";
+         window.history.pushState({path:cleanUrl},'',cleanUrl);
+      }
       
     } finally {
       setTimeout(() => {
@@ -887,6 +1052,12 @@ const App = {
         isPublic: isPublic
       });
       
+      // Compass連携: 完了ステータス通知（提出時）
+      if (APP_CONFIG.mode === 'student') {
+         const syncStatus = (status === 'submitted') ? '完了' : '途中';
+         App.notifyCompass('syncStatus', { status: syncStatus });
+      }
+      
       if (status === 'submitted') localStorage.removeItem(`manabi_${State.currentTask.id}`);
       UI.toast(status === 'draft' ? "保存しました" : "提出しました！");
     } finally {
@@ -961,8 +1132,8 @@ const App = {
     State.peerCanvas = new fabric.Canvas('plazaPeerCanvas', { selection: false });
     if(item.canvasJson) {
       State.peerCanvas.loadFromJSON(item.canvasJson, () => {
-         State.peerCanvas.forEachObject(o => o.selectable = false);
-         State.peerCanvas.renderAll();
+          State.peerCanvas.forEachObject(o => o.selectable = false);
+          State.peerCanvas.renderAll();
       });
     }
     App.renderPeerReactions(item.reactions);
