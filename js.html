@@ -1,10 +1,10 @@
 <script>
 /**
- * みらいパスポート v2.1.1
- * Update: Auto-Login from URL (Phase 2 Integration)
- * Update: Compass Integration (Status Sync & Mode Change)
- * Update: Auto-Generation Wizard from Compass (Phase 3)
- * Keeps all previous features (Stamps, Plaza, Edit Lock) intact.
+ * みらいパスポート v2.2.0
+ * Update: Phase 3/4 Real-time Sync with Mirai Compass
+ * Update: Enhanced Worksheet Wizard (Shared DB Import)
+ * Update: Student Status Toolbar (SOS/Focus) & Auto-Save
+ * Keeps all previous features (Printer, Plaza, Edit Lock) intact.
  */
 
 // ==============================================
@@ -35,11 +35,13 @@ const UI = {
     const sub = document.getElementById('loadingSubText');
     if (txt) txt.innerText = mainText;
     if (sub) sub.innerText = subText;
-    document.getElementById('loadingOverlay').classList.remove('d-none');
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.remove('d-none');
   },
 
   hideLoading: () => {
-    document.getElementById('loadingOverlay').classList.add('d-none');
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.add('d-none');
   },
 
   toast: (title, icon = 'success') => {
@@ -65,28 +67,21 @@ const UI = {
 };
 
 // ==============================================
-// ★ Unified Print System (New)
+// ★ Unified Print System
 // ==============================================
 const Printer = {
-  /**
-   * 統一印刷ロジック: 別ウィンドウを開いて印刷を実行
-   * @param {Array} pages - { html: string, img: string(base64/url) } の配列
-   */
   run: (pages) => {
     if (!pages || pages.length === 0) return;
 
-    // 1. 新しいウィンドウを開く
     const win = window.open('', '_blank');
     if (!win) {
       return Swal.fire('エラー', 'ポップアップがブロックされました。許可してください。', 'error');
     }
 
-    // 2. 現在のスタイルシートを収集 (Bootstrapやフォント等)
     const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
       .map(el => el.outerHTML)
       .join('');
 
-    // 3. 印刷専用CSS (ウィンドウ内でのみ有効)
     const printCss = `
       <style>
         body { 
@@ -99,10 +94,10 @@ const Printer = {
           .print-sheet {
             width: 100%;
             height: auto; 
-            min-height: 297mm; /* A4縦 */
+            min-height: 297mm;
             position: relative;
             box-sizing: border-box;
-            padding: 15mm; /* 余白 */
+            padding: 15mm;
             page-break-after: always;
             break-after: always;
             overflow: visible;
@@ -119,18 +114,13 @@ const Printer = {
             pointer-events: none;
             z-index: 10;
           }
-          /* 改ページ制御 */
           .ws-box, .ws-lines, table, tr, .ws-header, h1 {
             break-inside: avoid;
           }
-          /* 背景色強制 */
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          /* スタンプの見た目 */
           .eval-btn:not(.active) { opacity: 0.1; border-color: #eee; }
-          /* 不要なUI非表示 */
           .btn, button, .no-print { display: none !important; }
         }
-        /* 画面表示用 (プレビュー) */
         .print-sheet {
           border-bottom: 1px dashed #ccc;
           margin-bottom: 20px;
@@ -138,7 +128,6 @@ const Printer = {
       </style>
     `;
 
-    // 4. コンテンツ構築
     let contentHtml = '';
     pages.forEach(p => {
       contentHtml += `
@@ -149,7 +138,6 @@ const Printer = {
       `;
     });
 
-    // 5. 書き込みと印刷実行
     win.document.write(`
       <!DOCTYPE html>
       <html>
@@ -161,15 +149,11 @@ const Printer = {
         <body class="print-only-container">
           ${contentHtml}
           <script>
-            // 画像などの読み込みを待ってから印刷
             window.onload = () => {
               setTimeout(() => {
                 window.focus();
                 window.print();
-                // 印刷ダイアログ終了後に閉じる
-                try {
-                   window.close();
-                } catch(e) {}
+                try { window.close(); } catch(e) {}
               }, 1000);
             };
           <\/script>
@@ -181,7 +165,7 @@ const Printer = {
 };
 
 // ==============================================
-// Modal Controllers
+// Modals & Dashboard
 // ==============================================
 const Modals = {
   openSettings: () => new bootstrap.Modal(document.getElementById('settingsModal')).show(),
@@ -192,9 +176,7 @@ const Modals = {
     if (!State.currentTask) return Swal.fire('エラー', '授業を選択してください', 'warning');
     const container = document.getElementById('rubricContainer');
     container.innerHTML = State.currentTask.rubricHtml || 
-      `<div class="text-center py-5 text-muted">
-         <p class="mb-0">「AI作成」ボタンを押して評価基準を作成してください。</p>
-       </div>`;
+      `<div class="text-center py-5 text-muted"><p class="mb-0">「AI作成」ボタンを押して評価基準を作成してください。</p></div>`;
     new bootstrap.Modal(document.getElementById('rubricModal')).show();
   },
 
@@ -206,7 +188,7 @@ const Modals = {
       let subs = await Server.call('getTaskSubmissions', State.currentTask.id);
       if (!subs) subs = [];
       
-      State.dashboardData = subs; // メモリに保存
+      State.dashboardData = subs;
       const grid = document.getElementById('dashboardGrid');
       grid.innerHTML = '';
 
@@ -252,17 +234,17 @@ const Modals = {
 // Global State Management
 // ==============================================
 const State = {
-  unitData: null,      // 単元計画データ (JSON)
-  currentTask: null,   // 現在選択中の授業タスク
-  fabricCanvas: null,  // 手書きキャンバスインスタンス
-  peerCanvas: null,    // 友達の回答閲覧用キャンバス
-  isDrawMode: false,   // 手書きモードフラグ
-  ocrCache: "",        // OCR解析結果テキスト
-  studentId: null,     // 児童ID (LocalStorage)
-  gradingRow: null,    // 添削中の行番号
-  dashboardData: [],   // ダッシュボード用データキャッシュ
-  isGalleryMode: false,// ギャラリーモードフラグ
-  currentPeerResponse: null // 現在閲覧中の友達の回答
+  unitData: null,
+  currentTask: null,
+  fabricCanvas: null,
+  peerCanvas: null,
+  isDrawMode: false,
+  ocrCache: "",
+  studentId: null,
+  gradingRow: null,
+  dashboardData: [],
+  isGalleryMode: false,
+  currentPeerResponse: null
 };
 
 // ==============================================
@@ -272,24 +254,25 @@ const App = {
   
   // --- Initialization ---
   init: async () => {
-    // Student Setup (Modified for Phase 2: URL Parameter Login)
-    if (APP_CONFIG.mode === 'student') {
-      
-      // 1. URLパラメータから連携情報が来ているかチェック
-      if (APP_CONFIG.studentId && APP_CONFIG.studentName) {
-        // Compass連携: IDと名前を強制セット
-        State.studentId = APP_CONFIG.studentId;
-        localStorage.setItem('manabi_sid', State.studentId);
-        
-        // UIに名前を自動入力
+    // URLパラメータの解析（APP_CONFIGより優先）
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+    const taskId = params.get('taskId') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.taskId : '');
+    const studentId = params.get('studentId') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.studentId : '');
+    const studentName = params.get('studentName') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.studentName : '');
+    const importId = params.get('importId'); // Compassからの連携ID
+
+    // Student Mode
+    if (mode === 'student') {
+      // 1. Compass連携情報があれば保存
+      if (studentId && studentName) {
+        State.studentId = studentId;
+        localStorage.setItem('manabi_sid', studentId);
+        // 入力欄があれば自動入力
         const nameInput = document.getElementById('studentNameInput');
-        if (nameInput) {
-          nameInput.value = APP_CONFIG.studentName;
-          // UI的には入力済みだが読み取り専用っぽく見せても良いが、
-          // 修正したい場合もあるので入力可のままにする
-        }
+        if (nameInput) nameInput.value = studentName;
       } else {
-        // 通常起動: LocalStorageからID復元
+        // 通常起動: LocalStorageから復元
         State.studentId = localStorage.getItem('manabi_sid');
         if (!State.studentId) {
           State.studentId = 'S_' + Date.now() + Math.random().toString(36).substr(2, 5);
@@ -297,11 +280,46 @@ const App = {
         }
       }
       
-      // Auto-save loop
+      // Auto-save loop (自動保存)
       setInterval(App.autoSaveLocal, 10000);
+
+      // Student View Setup
+      UI.showLoading("ワークシートを準備しています", "課題データをダウンロード中...");
+      document.getElementById('appContainer').classList.remove('d-none');
+      
+      if (taskId) {
+        // 設定読み込み後に履歴ロード
+        await App.loadConfig(); // config (Compass URL) is needed for sync
+        App.loadFromHistory(taskId);
+      } else {
+        UI.hideLoading();
+        Swal.fire('エラー', '課題IDが無効です。URLを確認してください。', 'error');
+      }
+    } 
+    // Teacher Mode
+    else {
+      UI.showLoading("システムを起動しています", "ユーザー設定を確認中...");
+      const status = await Server.call('checkSetupStatus');
+      if (status.isSetup) {
+        document.getElementById('setupWizard').classList.add('d-none');
+        document.getElementById('appContainer').classList.remove('d-none');
+        await App.loadConfig();
+        Editor.init();
+        
+        // [New] Compass連携: インポートウィザードのチェック
+        if (importId) {
+          App.startImportWizard(importId);
+        } else {
+          // Legacy: Check for taskIds param
+          setTimeout(App.checkAutoGenerate, 800);
+        }
+      } else {
+        UI.hideLoading();
+        document.getElementById('setupWizard').classList.remove('d-none');
+      }
     }
 
-    // Global Event Listener for Evaluation Stamps (delegation)
+    // Event Listener for Stamps
     document.body.addEventListener('click', (e) => {
       const btn = e.target.closest('.eval-btn');
       if (btn) {
@@ -312,41 +330,13 @@ const App = {
         }
       }
     });
-
-    // View Setup
-    if (APP_CONFIG.mode === 'teacher') {
-      UI.showLoading("システムを起動しています", "ユーザー設定を確認中...");
-      const status = await Server.call('checkSetupStatus');
-      if (status.isSetup) {
-        document.getElementById('setupWizard').classList.add('d-none');
-        document.getElementById('appContainer').classList.remove('d-none');
-        App.loadConfig();
-        Editor.init();
-        
-        // [New] Compass連携: 自動生成チェック (パラメータがある場合)
-        setTimeout(App.checkAutoGenerate, 800);
-      } else {
-        UI.hideLoading();
-        document.getElementById('setupWizard').classList.remove('d-none');
-      }
-    } else {
-      // Student View
-      UI.showLoading("ワークシートを準備しています", "課題データをダウンロード中...");
-      document.getElementById('appContainer').classList.remove('d-none');
-      if (APP_CONFIG.taskId) {
-        App.loadFromHistory(APP_CONFIG.taskId);
-      } else {
-        UI.hideLoading();
-        Swal.fire('エラー', '課題IDが無効です。URLを確認してください。', 'error');
-      }
-    }
   },
 
   performSetup: async () => {
     UI.showLoading("データベースを構築しています", "初期化処理を実行中...");
     try {
       await Server.call('performInitialSetup');
-      location.reload(); // リロードして設定を反映
+      location.reload();
     } catch (e) {
       console.error(e);
     }
@@ -354,140 +344,174 @@ const App = {
 
   loadConfig: async () => {
     const config = await Server.call('getUserConfig');
-    document.getElementById('apiKeyInput').value = config.apiKey;
-    document.getElementById('teacherNameInput').value = config.teacherName;
-    // Compass URLの設定（あれば）
-    const urlInput = document.getElementById('compassUrlInput');
-    if (urlInput) urlInput.value = config.compassUrl || '';
+    if(document.getElementById('apiKeyInput')) document.getElementById('apiKeyInput').value = config.apiKey;
+    if(document.getElementById('teacherNameInput')) document.getElementById('teacherNameInput').value = config.teacherName;
+    if(document.getElementById('compassUrlInput')) document.getElementById('compassUrlInput').value = config.compassUrl || '';
     
-    UI.hideLoading();
-    App.loadHistory();
+    // Configをグローバルに保持（Sync用）
+    App.config = config; 
+    
+    // Only hide loading in Teacher mode if not loading history immediately
+    if (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.mode === 'teacher' && !window.location.search.includes('importId')) {
+        UI.hideLoading();
+        App.loadHistory();
+    }
   },
 
   saveSettings: async () => {
     await Server.call('saveUserConfig',
       document.getElementById('apiKeyInput').value,
       document.getElementById('teacherNameInput').value,
-      document.getElementById('compassUrlInput')?.value || '' // Compass URL
+      document.getElementById('compassUrlInput')?.value || ''
     );
     UI.toast('設定を保存しました');
     bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+    App.loadConfig(); // Reload config
   },
 
-  // --- Compass Integration (Teacher: Auto-Generate Wizard) ---
-  
-  checkAutoGenerate: async () => {
-    // URLパラメータのチェック
-    const params = new URLSearchParams(window.location.search);
-    const taskIdsStr = params.get('taskIds');
-    
-    if (!taskIdsStr) return; // パラメータがなければ終了
-    
-    const taskIds = taskIdsStr.split(',').filter(id => id);
-    if (taskIds.length === 0) return;
+  // --- Compass Integration (Sync) ---
 
-    UI.showLoading("連携データを確認中...", "単元計画を読み込んでいます");
-    try {
-      // 該当するタスク情報をDBから取得
-      const sheets = await Server.call('getWorksheetsByIds', taskIds);
-      
-      // htmlContentが空のタスク（＝未生成）を抽出
-      const unfinishedTasks = sheets.filter(s => !s.htmlContent || s.htmlContent.trim() === "");
-      
-      if (unfinishedTasks.length > 0) {
-        // unitDataの構成（生成処理で必要）
-        const sample = unfinishedTasks[0];
-        // 既存のunitDataが空なら補完
-        if (!State.unitData) {
-           State.unitData = {
-             unitInfo: { unitName: sample.unitName || "連携単元" },
-             tasks: unfinishedTasks.map(t => ({
-               id: t.taskId,
-               title: t.stepTitle,
-               description: "" // 詳細なdescriptionはDBにJSONとして保存されている
-             }))
-           };
-        }
-
-        Swal.fire({
-          title: 'ワークシート作成',
-          text: `コンパスから連携された ${unfinishedTasks.length} 件の未作成ワークシートがあります。AIで一括生成しますか？`,
-          icon: 'question',
-          showCancelButton: true,
-          confirmButtonText: '生成を開始する',
-          cancelButtonText: 'あとで'
-        }).then(async (result) => {
-          if (result.isConfirmed) {
-            // 詳細データをロードしてから生成へ
-            await App.startBatchGeneration(unfinishedTasks.map(t => t.taskId));
-          } else {
-            // URLパラメータを削除してリロード（再通知防止）
-            const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?mode=teacher";
-            window.history.pushState({path:newUrl},'',newUrl);
-          }
-        });
-      } else {
-        UI.toast('すべてのワークシートは作成済みです', 'info');
-        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?mode=teacher";
-        window.history.pushState({path:newUrl},'',newUrl);
-      }
-    } catch(e) {
-      console.error("Auto Gen Check Failed", e);
-    } finally {
-      UI.hideLoading();
-    }
-  },
-
-  // --- Compass Integration (Student: Status Sync) ---
-
-  changeStudentStatus: (mode) => {
-    // UIのトグル処理
-    ['normal', 'focus', 'sos'].forEach(m => {
-      const btn = document.getElementById(`btnStatus${m.charAt(0).toUpperCase() + m.slice(1)}`);
-      if(btn) {
-         if (m === mode) {
-            btn.classList.add('active');
-            // 塗りつぶしスタイルへの変更
-            const baseClass = m === 'normal' ? 'secondary' : (m === 'focus' ? 'danger' : 'warning');
-            btn.classList.remove(`btn-outline-${baseClass}`);
-            btn.classList.add(`btn-${baseClass}`);
-         } else {
-            btn.classList.remove('active');
-            // アウトラインスタイルに戻す
-            const baseClass = m === 'normal' ? 'secondary' : (m === 'focus' ? 'danger' : 'warning');
-            btn.classList.add(`btn-outline-${baseClass}`);
-            btn.classList.remove(`btn-${baseClass}`);
-         }
-      }
-    });
-    
-    // Compassへ通知
-    App.notifyCompass('syncMode', { mode: mode });
-    UI.toast(mode === 'sos' ? 'SOSを発信しました' : 'ステータスを変更しました', 'info');
-  },
-
+  // コンパスへ通知を送る (Fire-and-forget)
   notifyCompass: async (action, data = {}) => {
-    if (APP_CONFIG.mode !== 'student' || !State.studentId) return;
+    if (!App.config || !App.config.compassUrl || !State.studentId) return;
     
-    // 現在のタスク情報
-    const taskId = State.currentTask?.id || APP_CONFIG.taskId;
-    const taskTitle = State.currentTask?.title || document.getElementById('currentTaskTitle').innerText;
+    // URL paramsからmodeを取得 (APP_CONFIGが未定義の場合の対策)
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+    
+    if (mode !== 'student') return;
+
+    const nameInput = document.getElementById('studentNameInput');
+    const studentName = nameInput ? nameInput.value : '';
 
     const payload = {
       action: action,
       studentId: State.studentId,
-      studentName: document.getElementById('studentNameInput').value || APP_CONFIG.studentName,
-      taskId: taskId,
-      taskTitle: taskTitle,
+      studentName: studentName,
+      taskId: State.currentTask?.id,
+      taskTitle: State.currentTask?.title,
+      timestamp: new Date().getTime(),
       ...data
     };
 
-    // 非同期で送信（Fire-and-forget: 結果を待たずにUI操作を継続させる）
+    // サーバー経由で送信
     Server.call('syncToCompass', payload).then(res => {
-      if (!res.success && res.message) {
-         console.warn("Compass Sync Warning:", res.message);
+      if(!res.success) console.warn("Sync Warning:", res.error);
+    }).catch(e => console.error("Sync Failed:", e));
+  },
+
+  // 生徒ステータスの変更
+  setStudentStatus: (mode) => {
+    App.notifyCompass('syncStatus', { mode: mode, status: 'working' });
+    const msg = mode === 'sos' ? 'SOSを発信しました' : (mode === 'focus' ? '集中モードを開始しました' : 'ステータスを解除しました');
+    const icon = mode === 'sos' ? 'warning' : 'info';
+    UI.toast(msg, icon);
+  },
+
+  // 生徒用ツールバーの描画 (HTML構造に依存せず注入)
+  renderStudentToolbar: () => {
+    const container = document.getElementById('paperArea');
+    if (!container) return;
+
+    // 既存ツールバーがあれば削除
+    const existing = document.getElementById('student-toolbar');
+    if (existing) existing.remove();
+
+    const toolbar = document.createElement('div');
+    toolbar.id = 'student-toolbar';
+    toolbar.className = 'd-flex justify-content-between align-items-center mb-3 bg-white p-2 rounded shadow-sm sticky-top';
+    toolbar.style.top = '10px';
+    toolbar.style.zIndex = '1000';
+    
+    toolbar.innerHTML = `
+      <div class="fw-bold text-primary px-2"><i class="bi bi-pencil-square me-2"></i>${State.currentTask?.title || 'ワークシート'}</div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-danger rounded-pill px-3 btn-sm fw-bold" onclick="App.setStudentStatus('sos')"><i class="bi bi-exclamation-circle-fill me-1"></i>SOS</button>
+        <button class="btn btn-outline-info rounded-pill px-3 btn-sm fw-bold" onclick="App.setStudentStatus('focus')"><i class="bi bi-lightning-fill me-1"></i>集中</button>
+        <button class="btn btn-success rounded-pill px-4 btn-sm fw-bold shadow-sm" onclick="App.submitStudentResponse('submitted')"><i class="bi bi-send-fill me-1"></i>提出</button>
+      </div>
+    `;
+    
+    // コンテナの最上部に挿入
+    container.insertBefore(toolbar, container.firstChild);
+  },
+
+  // --- Import Wizard (Shared DB) ---
+
+  startImportWizard: async (importId) => {
+    UI.showLoading("連携データを確認中...", "単元計画を読み込んでいます");
+    try {
+      const res = await Server.call('consumeImportQueue', importId);
+      if (res.success) {
+        // unitDataの構成
+        State.unitData = {
+          unitInfo: { unitName: res.unitName || "連携単元" },
+          tasks: res.taskIds.map(id => ({ id: id, title: "読み込み中..." })) // Placeholder
+        };
+        
+        Swal.fire({
+          title: 'ワークシート作成連携',
+          text: `みらいコンパスから ${res.taskIds.length} 件の活動データを取り込みました。AIでワークシートを一括作成しますか？`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: 'AI作成を開始',
+          cancelButtonText: '手動で作成'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            App.startBatchGeneration(res.taskIds);
+          } else {
+            // リロードして通常画面へ
+            window.location.href = window.location.pathname + "?mode=teacher";
+          }
+        });
+      } else {
+        Swal.fire('連携エラー', res.message, 'error').then(() => {
+           window.location.href = window.location.pathname + "?mode=teacher";
+        });
       }
-    }).catch(e => console.error("Compass Sync Failed:", e));
+    } catch(e) {
+      console.error(e);
+      UI.hideLoading();
+    }
+  },
+
+  // --- Existing Check Logic (Legacy) ---
+  checkAutoGenerate: async () => {
+    const params = new URLSearchParams(window.location.search);
+    const taskIdsStr = params.get('taskIds');
+    if (!taskIdsStr) return;
+    const taskIds = taskIdsStr.split(',').filter(id => id);
+    if (taskIds.length === 0) return;
+
+    UI.showLoading("連携データを確認中...");
+    try {
+      const sheets = await Server.call('getWorksheetsByIds', taskIds);
+      const unfinishedTasks = sheets.filter(s => !s.htmlContent || s.htmlContent.trim() === "");
+      
+      if (unfinishedTasks.length > 0) {
+        if (!State.unitData) {
+           State.unitData = {
+             unitInfo: { unitName: unfinishedTasks[0].unitName || "連携単元" },
+             tasks: unfinishedTasks.map(t => ({ id: t.taskId, title: t.stepTitle, description: "" }))
+           };
+        }
+        Swal.fire({
+          title: 'ワークシート作成',
+          text: `${unfinishedTasks.length} 件の未作成ワークシートがあります。AIで一括生成しますか？`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: '生成を開始',
+          cancelButtonText: 'あとで'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            App.startBatchGeneration(unfinishedTasks.map(t => t.taskId));
+          } else {
+            const newUrl = window.location.pathname + "?mode=teacher";
+            window.history.pushState({path:newUrl},'',newUrl);
+          }
+        });
+      }
+    } catch(e) { console.error(e); } finally { UI.hideLoading(); }
   },
 
   // --- Data Management ---
@@ -574,7 +598,11 @@ const App = {
     
     try { App.resetCanvas(); } catch(e) { console.warn(e); }
     
-    document.getElementById('worksheetContent').contentEditable = (APP_CONFIG.mode === 'teacher');
+    // Check Mode using URL params first
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+    
+    document.getElementById('worksheetContent').contentEditable = (mode === 'teacher');
     
     UI.showLoading("データを取得中...");
     try {
@@ -585,12 +613,14 @@ const App = {
         State.currentTask.rubricHtml = data.rubricHtml;
         if (data.canvasJson) State.currentTask.canvasData = data.canvasJson;
         
-        if (APP_CONFIG.mode === 'student') {
+        if (mode === 'student') {
           setTimeout(async () => {
             App.toggleDrawMode(true); 
             await App.loadMyResponse();
-            // Compass連携: 着手ステータス通知
-            App.notifyCompass('syncStatus', { status: '途中' });
+            // Compass連携: ステータス通知
+            App.notifyCompass('syncStatus', { status: '途中', mode: 'normal' });
+            // [New] ツールバー表示
+            App.renderStudentToolbar();
           }, 500);
         }
       } else {
@@ -611,7 +641,7 @@ const App = {
           </div>`;
       }
       
-      if(APP_CONFIG.mode === 'teacher') Editor.enableResizing();
+      if(mode === 'teacher') Editor.enableResizing();
 
     } finally {
       UI.hideLoading();
@@ -623,19 +653,20 @@ const App = {
   loadHistory: async () => {
     const history = await Server.call('getHistory');
     const list = document.getElementById('historyList');
-    list.innerHTML = '';
-    
-    history.forEach(h => {
-      const btn = document.createElement('button');
-      btn.className = 'list-group-item list-group-item-action small py-2';
-      btn.innerHTML = `
-        <div class="fw-bold text-truncate">${h.title}</div>
-        <small class="text-muted" style="font-size:0.75rem">
-          ${new Date(h.timestamp).toLocaleDateString()} ${new Date(h.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-        </small>`;
-      btn.onclick = () => App.loadFromHistory(h.id);
-      list.appendChild(btn);
-    });
+    if(list) {
+      list.innerHTML = '';
+      history.forEach(h => {
+        const btn = document.createElement('button');
+        btn.className = 'list-group-item list-group-item-action small py-2';
+        btn.innerHTML = `
+          <div class="fw-bold text-truncate">${h.title}</div>
+          <small class="text-muted" style="font-size:0.75rem">
+            ${new Date(h.timestamp).toLocaleDateString()} ${new Date(h.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+          </small>`;
+        btn.onclick = () => App.loadFromHistory(h.id);
+        list.appendChild(btn);
+      });
+    }
   },
 
   loadFromHistory: async (taskId) => {
@@ -651,7 +682,11 @@ const App = {
         
         document.getElementById('worksheetContent').innerHTML = data.htmlContent;
         document.getElementById('currentTaskTitle').innerText = data.stepTitle;
-        document.getElementById('worksheetContent').contentEditable = (APP_CONFIG.mode === 'teacher');
+        
+        // Mode Check
+        const params = new URLSearchParams(window.location.search);
+        const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+        document.getElementById('worksheetContent').contentEditable = (mode === 'teacher');
 
         State.currentTask = {
           id: data.taskId,
@@ -668,18 +703,19 @@ const App = {
           tasks: [State.currentTask]
         };
 
-        if (APP_CONFIG.mode === 'teacher') App.renderTaskList();
+        if (mode === 'teacher') App.renderTaskList();
         
-        if (APP_CONFIG.mode === 'student') {
+        if (mode === 'student') {
           setTimeout(async () => {
             App.toggleDrawMode(true);
             await App.loadMyResponse();
-            // Compass連携: 着手ステータス通知
-            App.notifyCompass('syncStatus', { status: '途中' });
+            // Compass連携 & ツールバー
+            App.notifyCompass('syncStatus', { status: '途中', mode: 'normal' });
+            App.renderStudentToolbar();
           }, 500);
         }
         
-        if(APP_CONFIG.mode === 'teacher') Editor.enableResizing();
+        if(mode === 'teacher') Editor.enableResizing();
         
       } else {
         Swal.fire('エラー', 'データが見つかりません。削除された可能性があります。', 'error');
@@ -692,7 +728,7 @@ const App = {
     }
   },
 
-  // --- AI Generation (Preserving Stamps Prompt) ---
+  // --- AI Generation (Prompt) ---
 
   generateSingleWorksheet: async (useOcr = false) => {
     if (!State.currentTask) return;
@@ -704,75 +740,62 @@ const App = {
       }
 
       const info = State.unitData?.unitInfo || { grade: "", unitName: "" };
+      const description = State.currentTask.description || "";
       
-      // ★ スタンプ対応のプロンプトを維持
+      // Phase 4: Enhanced Prompt (called from Server Side actually in v2.2.0 proposal, 
+      // but keeping local prompt logic for manual generation to maintain consistency)
       const prompt = `
-        あなたは日本の小学校教師です。以下の授業情報から、児童が取り組むためのワークシートのHTML(body内部のみ)を作成してください。
+        あなたは日本の小学校教師です。以下の授業情報から、児童が自立的に取り組むためのワークシートHTMLを作成してください。
         
         【授業情報】
         学年: ${info.grade}
         単元名: ${info.unitName}
         授業タイトル: ${State.currentTask.title}
-        活動内容: ${State.currentTask.description}
+        活動内容: ${description}
         ${extraContext}
         
         【出力HTMLの構成（厳守）】
-        以下のHTML構造をテンプレートとしてそのまま使用し、「3. 本文エリア」の中身のみを活動内容に合わせて記述してください。
-        Markdown記法(\`\`\`html)は禁止です。
+        以下の構造を使用し、AIコーチング要素（ヒント、めあて）を盛り込んでください。
+        Markdown記法は禁止です。
 
-        <!-- 1. リッチヘッダー -->
+        <!-- 1. ヘッダー -->
         <div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px; font-family: 'Zen Maru Gothic', sans-serif;">
-           <div>
-             <span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7em; margin-right:5px;">${info.grade}</span>
-             <span style="font-weight:bold; color:#333;">${info.unitName}</span>
-           </div>
-           <div style="text-align:right; font-size:0.9em;">
-             <span style="margin-right:15px;">年　組　番</span>
-             <span style="font-weight:bold; font-size:1.1em;">名前 __________________</span>
-           </div>
+           <div><span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7em; margin-right:5px;">${info.grade}</span><span style="font-weight:bold;">${info.unitName}</span></div>
+           <div style="text-align:right;">年 組 名前 __________________</div>
         </div>
 
-        <!-- 2. タイトル -->
-        <h1 style="text-align:center; font-size:1.8em; margin-bottom:30px; border-bottom:1px solid #ddd; padding-bottom:10px;">${State.currentTask.title}</h1>
-
-        <!-- 3. 本文エリア（ここをAIが生成） -->
-        <div style="min-height: 400px;">
-          (ここに学習課題・問い・記述欄を生成。クラス名: ws-box, ws-lines, table table-bordered を活用)
+        <!-- 2. タイトル & めあて -->
+        <h1 style="text-align:center; font-size:1.8em; margin-bottom:20px;">${State.currentTask.title}</h1>
+        <div style="background:#e3f2fd; padding:10px; border-radius:8px; margin-bottom:20px; border-left:5px solid #2196f3;">
+           <strong>今日のめあて:</strong> (活動内容から子供向けのめあてを生成)
         </div>
 
-        <!-- 4. コンパクトフッター（振り返り＆自己評価） -->
-        <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px; align-items: start;">
+        <!-- 3. AIヒント (Coaching) -->
+        <div style="background:#fff3e0; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.9em; color:#e65100;">
+           <strong><i class="bi bi-lightbulb-fill"></i> AIコーチのヒント:</strong>
+           (この活動でつまずきやすい点や、考えるためのヒントを1-2行で記述)
+        </div>
+
+        <!-- 4. 本文エリア -->
+        <div style="min-height: 350px;">
+          (学習課題・問い・記述欄を生成。クラス名: ws-box, ws-lines, rich-editor 等を活用)
+        </div>
+
+        <!-- 5. フッター (スタンプ) -->
+        <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">
           <div style="flex: 6;">
-            <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px; color:#555;">■ ふりかえり</div>
-            <div class="ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em; line-height: 1.5em;"></div>
+            <div style="font-weight:bold; font-size:0.9em;">■ ふりかえり</div>
+            <div class="ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em;"></div>
           </div>
           <div style="flex: 4;">
-            <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ 自己評価</div>
-            <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center; background:#fff;">
-              <tr>
-                <td class="bg-light text-start">わかった・できた</td>
-                <td style="vertical-align:middle; width:120px;">
-                   <span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span>
-                </td>
-              </tr>
-              <tr>
-                <td class="bg-light text-start">考えた・表した</td>
-                <td style="vertical-align:middle;">
-                   <span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span>
-                </td>
-              </tr>
-              <tr>
-                <td class="bg-light text-start">進んで学んだ</td>
-                <td style="vertical-align:middle;">
-                   <span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span>
-                </td>
-              </tr>
+            <div style="font-weight:bold; font-size:0.9em;">■ 自己評価</div>
+            <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center;">
+              <tr><td class="bg-light">わかった</td><td><span class="eval-btn">◎</span><span class="eval-btn">◯</span><span class="eval-btn">△</span></td></tr>
+              <tr><td class="bg-light">考えた</td><td><span class="eval-btn">◎</span><span class="eval-btn">◯</span><span class="eval-btn">△</span></td></tr>
+              <tr><td class="bg-light">進んで</td><td><span class="eval-btn">◎</span><span class="eval-btn">◯</span><span class="eval-btn">△</span></td></tr>
             </table>
           </div>
         </div>
-
-        【配慮】
-        低学年の場合は漢字を減らし、平易な表現にしてください。
       `;
 
       let html = await Server.call('callGeminiAPI', prompt);
@@ -790,7 +813,7 @@ const App = {
       
     } catch (e) {
       console.error(e);
-      Swal.fire('生成エラー', 'AIによる生成に失敗しました。時間をおいて試してください。', 'error');
+      Swal.fire('生成エラー', 'AIによる生成に失敗しました。', 'error');
     } finally {
       UI.hideLoading();
     }
@@ -806,28 +829,26 @@ const App = {
       .trim();
   },
 
-  // [Update] targetTaskIds を受け取れるように改修
+  // [Update] ターゲットIDリストを受け取るように拡張
   startBatchGeneration: async (targetTaskIds = null) => {
     let queue = [];
     
     if (targetTaskIds && Array.isArray(targetTaskIds)) {
       // IDリストが渡された場合、DBから詳細をロードしてキューに追加
       for (const tid of targetTaskIds) {
-        // DBからロード（同期的に待機）
         const data = await Server.call('loadWorksheetFromDB', tid);
         if (data) {
           queue.push({
             id: data.taskId,
             title: data.stepTitle,
-            // description が空だとAIが困るので、jsonSourceがあれば復元
             description: (data.jsonSource && data.jsonSource.description) ? data.jsonSource.description : data.stepTitle,
             unitName: data.unitName,
-            jsonSource: data.jsonSource // AI生成時にそのまま渡せるように保持
+            jsonSource: data.jsonSource
           });
         }
       }
     } else {
-      // 既存ロジック（チェックボックスから）
+      // 既存ロジック（UIのチェックボックスから）
       const checkboxes = document.querySelectorAll('.task-checkbox:checked');
       if (checkboxes.length === 0) return Swal.fire('選択なし', '生成するタスクを選択してください', 'info');
       queue = Array.from(checkboxes).map(cb => State.unitData.tasks.find(t => t.id === cb.value));
@@ -837,59 +858,27 @@ const App = {
     
     if (!confirm(`${queue.length}件のワークシートを一括生成しますか？`)) return;
 
-    UI.showLoading("一括生成を開始します", "しばらくそのままお待ちください...");
+    UI.showLoading("一括生成を開始します", "AIが執筆中...");
     UI.toggleBatchProgress(true);
     
-    // unitInfoの補完
-    const unitName = (State.unitData?.unitInfo?.unitName) || (queue[0].unitName) || "単元";
-    const grade = (State.unitData?.unitInfo?.grade) || "学年";
-
     try {
       for (let i = 0; i < queue.length; i++) {
         const task = queue[i];
         UI.updateBatchProgress(Math.round(((i) / queue.length) * 100), `${i + 1} / ${queue.length}: ${task.title}`);
         
         try {
-          const prompt = `
-            あなたは小学校教師です。以下の授業情報からワークシートHTMLを作成してください。
-            授業情報: 学年:${grade}, 単元:${unitName}, タイトル:${task.title}, 活動:${task.description}
-            
-            【出力HTML構成（厳守）】
-            <!-- 4. フッター (スタンプ付き) -->
-            <div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">
-              <div style="flex: 6;">
-                <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ ふりかえり</div>
-                <div class="ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em;"></div>
-              </div>
-              <div style="flex: 4;">
-                <div style="font-weight:bold; font-size:0.9em; margin-bottom:5px;">■ 自己評価</div>
-                <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center;">
-                  <tr>
-                    <td class="bg-light">わかった・できた</td>
-                    <td style="width:120px;"><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
-                  </tr>
-                  <tr>
-                    <td class="bg-light">考えた・表した</td>
-                    <td style="width:120px;"><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
-                  </tr>
-                  <tr>
-                    <td class="bg-light">進んで学んだ</td>
-                    <td style="width:120px;"><span class="eval-btn" data-val="3">◎</span><span class="eval-btn" data-val="2">◯</span><span class="eval-btn" data-val="1">△</span></td>
-                  </tr>
-                </table>
-              </div>
-            </div>
-          `;
+          // Server-side generation function (Phase 4 Enhanced)
+          const html = await Server.call('generateSingleWorksheet', {
+            unitName: task.unitName || State.unitData?.unitInfo?.unitName || "単元",
+            stepTitle: task.title,
+            description: task.description
+          });
           
-          let html = await Server.call('callGeminiAPI', prompt);
-          html = App.cleanAIOutput(html);
-          
-          // jsonSourceの更新用（なければ最低限の情報で作成）
           const jsonSrc = task.jsonSource || { id: task.id, title: task.title, description: task.description };
 
           await Server.call('saveWorksheetToDB', {
             taskId: task.id,
-            unitName: unitName,
+            unitName: task.unitName || State.unitData?.unitInfo?.unitName,
             stepTitle: task.title,
             htmlContent: html,
             jsonSource: jsonSrc
@@ -897,7 +886,7 @@ const App = {
         } catch (e) {
           console.error(`Task ${task.title} failed:`, e);
         }
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 1000));
       }
       
       UI.updateBatchProgress(100, '完了');
@@ -906,7 +895,7 @@ const App = {
       
       // URLパラメータの掃除
       if (targetTaskIds) {
-         const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "?mode=teacher";
+         const cleanUrl = window.location.pathname + "?mode=teacher";
          window.history.pushState({path:cleanUrl},'',cleanUrl);
       }
       
@@ -939,26 +928,25 @@ const App = {
     try {
       await Server.call('saveWorksheetToDB', data);
       UI.toast("保存しました");
-      if (APP_CONFIG.mode === 'teacher') App.loadHistory();
+      
+      // Mode Check
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+      if (mode === 'teacher') App.loadHistory();
+      
     } finally {
       UI.hideLoading();
     }
   },
 
-  // ★ New Unified Print Methods (Using Printer object)
+  // ★ Unified Print Methods
   printCurrentWorksheet: async () => {
     if (!State.currentTask) return;
-    
-    // 現在のHTMLコンテンツ
     const html = document.getElementById('worksheetContent').innerHTML;
-    
-    // 現在の手書きキャンバス画像 (高画質)
     let img = null;
     if (State.fabricCanvas) {
       img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
     }
-    
-    // 統一プリンタへ送信
     Printer.run([{ html, img }]);
   },
 
@@ -971,15 +959,11 @@ const App = {
     
     try {
       const sheets = await Server.call('getWorksheetsByIds', taskIds);
-      
-      // データをPrinter用に整形
       const pages = sheets.map(s => ({
         html: s.htmlContent,
-        img: null // 一括印刷時は現状手書きデータを含めない（必要ならDBから取得して含める）
+        img: null
       }));
-      
       Printer.run(pages);
-      
     } finally {
       UI.hideLoading();
     }
@@ -988,7 +972,10 @@ const App = {
   // --- Student & Grading Logic ---
   
   autoSaveLocal: () => {
-    if (APP_CONFIG.mode !== 'student' || !State.currentTask || !State.fabricCanvas) return;
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+    if (mode !== 'student' || !State.currentTask || !State.fabricCanvas) return;
+    
     const key = `manabi_${State.currentTask.id}`;
     localStorage.setItem(key, JSON.stringify({ j: State.fabricCanvas.toJSON(), t: Date.now() }));
     const ind = document.getElementById('autoSaveIndicator');
@@ -1020,8 +1007,10 @@ const App = {
   },
 
   submitStudentResponse: async (status) => {
-    const name = document.getElementById('studentNameInput').value;
-    const isPublic = document.getElementById('isPublicCheck').checked;
+    const nameInput = document.getElementById('studentNameInput');
+    const name = nameInput ? nameInput.value : APP_CONFIG.studentName;
+    const isPublicCheck = document.getElementById('isPublicCheck');
+    const isPublic = isPublicCheck ? isPublicCheck.checked : true;
     
     if (!name && status === 'submitted') return Swal.fire('名前を入力してください', '', 'warning');
     
@@ -1030,7 +1019,7 @@ const App = {
       let img = "";
       if (State.fabricCanvas) img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 0.5 });
       
-      // ★ 自己評価の結果をテキスト化して収集 (スタンプロジック維持)
+      // 自己評価収集
       let evalText = "";
       const rows = document.querySelectorAll('#worksheetContent table tr');
       rows.forEach(r => {
@@ -1052,20 +1041,19 @@ const App = {
         isPublic: isPublic
       });
       
-      // Compass連携: 完了ステータス通知（提出時）
-      if (APP_CONFIG.mode === 'student') {
-         const syncStatus = (status === 'submitted') ? '完了' : '途中';
-         App.notifyCompass('syncStatus', { status: syncStatus });
+      // Compass連携: 完了通知
+      if (status === 'submitted') {
+        App.notifyCompass('syncStatus', { status: 'done', mode: 'normal' });
+        localStorage.removeItem(`manabi_${State.currentTask.id}`);
       }
       
-      if (status === 'submitted') localStorage.removeItem(`manabi_${State.currentTask.id}`);
       UI.toast(status === 'draft' ? "保存しました" : "提出しました！");
     } finally {
       UI.hideLoading();
     }
   },
 
-  // --- Plaza (Gallery) Split View Logic ---
+  // --- Plaza (Gallery) Logic ---
 
   toggleGalleryMode: async (show) => {
     State.isGalleryMode = show;
@@ -1075,21 +1063,22 @@ const App = {
     const btnPlaza = document.getElementById('btnModePlaza');
     
     if (show) {
-      btnWork.classList.replace('btn-primary', 'btn-light');
-      btnPlaza.classList.replace('btn-light', 'btn-primary');
-      workspace.classList.add('scale-down-mode');
-      plaza.classList.remove('d-none');
+      if(btnWork) btnWork.classList.replace('btn-primary', 'btn-light');
+      if(btnPlaza) btnPlaza.classList.replace('btn-light', 'btn-primary');
+      if(workspace) workspace.classList.add('scale-down-mode');
+      if(plaza) plaza.classList.remove('d-none');
       await App.loadPlazaItems();
     } else {
-      btnWork.classList.replace('btn-light', 'btn-primary');
-      btnPlaza.classList.replace('btn-primary', 'btn-light');
-      workspace.classList.remove('scale-down-mode');
-      plaza.classList.add('d-none');
+      if(btnWork) btnWork.classList.replace('btn-light', 'btn-primary');
+      if(btnPlaza) btnPlaza.classList.replace('btn-primary', 'btn-light');
+      if(workspace) workspace.classList.remove('scale-down-mode');
+      if(plaza) plaza.classList.add('d-none');
     }
   },
 
   loadPlazaItems: async () => {
     const grid = document.getElementById('plazaGrid');
+    if(!grid) return;
     grid.innerHTML = '<div class="text-center w-100 py-5"><div class="spinner-border text-primary"></div></div>';
     try {
       const items = await Server.call('getSharedResponses', State.currentTask.id);
@@ -1152,7 +1141,9 @@ const App = {
     const commentInput = document.getElementById('reactionComment');
     const val = type === 'comment' ? commentInput.value : value;
     if(!val) return;
-    const tempReaction = { type, value: val, fromName: document.getElementById('studentNameInput').value || '自分' };
+    
+    const myName = document.getElementById('studentNameInput') ? document.getElementById('studentNameInput').value : '自分';
+    const tempReaction = { type, value: val, fromName: myName };
     State.currentPeerResponse.reactions.push(tempReaction);
     App.renderPeerReactions(State.currentPeerResponse.reactions);
     if(type === 'comment') commentInput.value = '';
@@ -1296,7 +1287,10 @@ const App = {
       if (State.fabricCanvas) State.fabricCanvas.isDrawingMode = false;
       const cnt = document.querySelector('.canvas-container');
       if(cnt) cnt.style.pointerEvents = 'none';
-      document.getElementById('worksheetContent').contentEditable = (APP_CONFIG.mode === 'teacher');
+      
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode') || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+      document.getElementById('worksheetContent').contentEditable = (mode === 'teacher');
     }
   },
 
@@ -1352,7 +1346,7 @@ const App = {
 };
 
 // ==============================================
-// Rich Editor Module (Context Menu & Resizing)
+// Rich Editor Module
 // ==============================================
 const Editor = {
   currentTarget: null,
@@ -1369,7 +1363,6 @@ const Editor = {
     document.addEventListener('contextmenu', (e) => {
       const ws = document.getElementById('worksheetContent');
       if (!ws || !ws.contains(e.target)) return;
-      // Teacher mode check
       if(document.getElementById('worksheetContent').contentEditable !== "true") return;
 
       e.preventDefault();
@@ -1389,8 +1382,8 @@ const Editor = {
     style.innerHTML = `
       .ws-box, .ws-lines { 
         resize: vertical; 
-        overflow: hidden;
-        position: relative;
+        overflow: hidden; 
+        position: relative; 
         min-height: 50px;
       }
       @media print { .ws-box, .ws-lines { resize: none; overflow: visible; } }
