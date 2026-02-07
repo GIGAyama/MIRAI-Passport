@@ -1,217 +1,545 @@
 <style>
-/* =========================================
-   1. テーマ変数 (Theme Variables)
-   ========================================= */
+/**
+ * ============================================================
+ *  みらいパスポート v3.0.0 — スタイルシート (css.html)
+ * ============================================================
+ *
+ * ■ このファイルの役割
+ *   アプリ全体の見た目（色・サイズ・アニメーション・レイアウト）を定義します。
+ *   index.html から <?!= include('css'); ?> で読み込まれます。
+ *
+ * ■ セクション構成
+ *   1. テーマ変数         — 色やサイズの基本設定（ここを変えると全体の色が変わる）
+ *   2. ローディング画面   — アプリ起動時のパスポートアニメーション
+ *   3. アプリ全体レイアウト — ヘッダー・サイドバー・メイン・フッターの配置
+ *   4. ステータス表示     — 児童の SOS / 集中モードの視覚効果
+ *   5. レスポンシブ対応   — Chromebook や小さい画面での表示調整
+ *   6. エディタ & 用紙    — ワークシート編集画面の用紙レイアウト
+ *   7. AI生成ワークシート — AI が作るワークシートの部品スタイル
+ *   8. 教科別モード       — 国語（縦書き）・算数（マス目）等の教科固有スタイル
+ *   9. ビジュアルエディタ — 右クリックメニュー・要素選択・リサイズ
+ *  10. 児童モード専用     — 児童画面のヘッダー色・サイドバー非表示
+ *  11. 印刷用スタイル     — 印刷時にUIを隠してA4用紙で出力する設定
+ *
+ * ============================================================
+ */
+
+
+/* ============================================================
+ *  1. テーマ変数（カスタムプロパティ）
+ *  ※ ここの色を変えるとアプリ全体の配色が変わります
+ * ============================================================ */
 :root {
-  --color-primary: #1a73e8;
-  --color-success: #34a853;
-  --color-warning: #fbbc04;
-  --color-danger: #ea4335;
-  --color-info: #4285f4; /* 追加 */
-  --bg-body: #f0f2f5;
-  --bg-card: #ffffff;
-  --bg-sidebar: #ffffff;
-  --bg-loader: #ffffff;
-  --text-main: #3c4043;
-  --text-muted: #6c757d;
-  --border-color: #dee2e6;
-  --shadow-sm: 0 .125rem .25rem rgba(0,0,0,.075);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
-  --pp-blue: #90caf9;
-  --pp-pink: #f48fb1;
-  --pp-orange: #ffab91;
-  --pp-cyan: #80deea;
-  --pp-shadow: rgba(144, 202, 249, 0.4);
-  --p-width: 130px;
-  --p-height: 180px;
-  --p-radius: 12px;
-  --p-offset: 65px;
-  --ws-grid-blue: #aaccff;
-  --ws-grid-gray: #dddddd;
-  --ws-border-strong: #333333;
+  /* --- メインカラー --- */
+  --color-primary: #1a73e8;   /* 青：ボタン・リンクの基本色 */
+  --color-success: #34a853;   /* 緑：成功・児童モードのテーマ色 */
+  --color-warning: #fbbc04;   /* 黄：警告・注意 */
+  --color-danger:  #ea4335;   /* 赤：エラー・SOS */
+  --color-info:    #4285f4;   /* 水色：情報・集中モード */
+
+  /* --- 背景色 --- */
+  --bg-body:    #f0f2f5;      /* ページ全体の背景（薄いグレー） */
+  --bg-card:    #ffffff;      /* カード・パネルの背景（白） */
+  --bg-sidebar: #ffffff;      /* サイドバーの背景（白） */
+  --bg-loader:  #ffffff;      /* ローディング画面の背景（白） */
+
+  /* --- 文字色 --- */
+  --text-main:  #3c4043;      /* 本文の文字色 */
+  --text-muted: #6c757d;      /* 補助テキスト（薄いグレー） */
+
+  /* --- 線・影 --- */
+  --border-color: #dee2e6;    /* 罫線の色 */
+  --shadow-sm: 0 .125rem .25rem rgba(0,0,0,.075);   /* 小さい影 */
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.1);           /* 中くらいの影 */
+
+  /* --- パスポートアニメーション用 --- */
+  --pp-blue:   #90caf9;       /* パスポートの青 */
+  --pp-pink:   #f48fb1;       /* デザイン装飾のピンク */
+  --pp-orange: #ffab91;       /* デザイン装飾のオレンジ */
+  --pp-cyan:   #80deea;       /* デザイン装飾のシアン */
+  --pp-shadow: rgba(144, 202, 249, 0.4);  /* パスポートの影 */
+  --p-width:   130px;         /* パスポートの横幅 */
+  --p-height:  180px;         /* パスポートの縦幅 */
+  --p-radius:  12px;          /* パスポートの角丸 */
+  --p-offset:  65px;          /* パスポートの横ずれ量 */
+
+  /* --- ワークシートの罫線・グリッド用 --- */
+  --ws-grid-blue:    #aaccff;  /* 方眼の青い線 */
+  --ws-grid-gray:    #dddddd;  /* グラフ用紙のグレー線 */
+  --ws-border-strong: #333333; /* ワークシートの太い罫線 */
 }
 
-/* =========================================
-   2. ローディングアニメーション
-   ========================================= */
+
+/* ============================================================
+ *  2. ローディング画面（パスポートが浮遊するアニメーション）
+ *  ※ アプリ起動時やAI生成中に表示される全画面オーバーレイ
+ * ============================================================ */
+
+/* --- 全画面を覆うオーバーレイ --- */
 #loadingOverlay {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: var(--bg-loader); z-index: 9999;
-  display: flex; justify-content: center; align-items: center; flex-direction: column;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: var(--bg-loader);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
 }
-.scene { width: 300px; height: 300px; perspective: 1000px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.passport { width: var(--p-width); height: var(--p-height); position: relative; transform-style: preserve-3d; transform: rotateX(25deg) translateX(var(--p-offset)); animation: float 3s ease-in-out infinite; }
-@keyframes float { 0%, 100% { transform: rotateX(25deg) translateX(var(--p-offset)) translateY(0); } 50% { transform: rotateX(25deg) translateX(var(--p-offset)) translateY(-10px); } }
-.pp-sheet { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 4px var(--p-radius) var(--p-radius) 4px; transform-origin: left center; transform-style: preserve-3d; }
-.back-plate { background-color: var(--pp-blue); transform: translateZ(-4px); box-shadow: 0 10px 20px var(--pp-shadow); border: 2px solid white; }
-.base-left { background-color: #fff; transform: rotateY(-180deg) translateZ(2px); border-radius: var(--p-radius) 4px 4px var(--p-radius); border-right: 2px solid #e3f2fd; box-shadow: inset -3px 0 8px rgba(144, 202, 249, 0.2); }
-.base-right { background-color: #fff; transform: translateZ(0px); border-left: 2px solid #e3f2fd; box-shadow: inset 3px 0 8px rgba(144, 202, 249, 0.2); }
+
+/* --- パスポートを中央に配置する3Dステージ --- */
+.scene {
+  width: 300px; height: 300px;
+  perspective: 1000px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- パスポート本体（3D変換で浮遊） --- */
+.passport {
+  width: var(--p-width);
+  height: var(--p-height);
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(25deg) translateX(var(--p-offset));
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ふわふわ上下に浮く動き */
+@keyframes float {
+  0%, 100% { transform: rotateX(25deg) translateX(var(--p-offset)) translateY(0); }
+  50%      { transform: rotateX(25deg) translateX(var(--p-offset)) translateY(-10px); }
+}
+
+/* --- パスポートの各ページ（共通） --- */
+.pp-sheet {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  border-radius: 4px var(--p-radius) var(--p-radius) 4px;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+}
+
+/* 裏表紙（一番奥の青いプレート） */
+.back-plate {
+  background-color: var(--pp-blue);
+  transform: translateZ(-4px);
+  box-shadow: 0 10px 20px var(--pp-shadow);
+  border: 2px solid white;
+}
+
+/* 左ページのベース */
+.base-left {
+  background-color: #fff;
+  transform: rotateY(-180deg) translateZ(2px);
+  border-radius: var(--p-radius) 4px 4px var(--p-radius);
+  border-right: 2px solid #e3f2fd;
+  box-shadow: inset -3px 0 8px rgba(144, 202, 249, 0.2);
+}
+
+/* 右ページのベース */
+.base-right {
+  background-color: #fff;
+  transform: translateZ(0px);
+  border-left: 2px solid #e3f2fd;
+  box-shadow: inset 3px 0 8px rgba(144, 202, 249, 0.2);
+}
+
+/* めくれるページ（zインデックスで重なり順を制御） */
 .flipping-page { z-index: 10; }
-.pp-face { position: absolute; top: 0; left: 0; width: 100%; height: 100%; backface-visibility: hidden; background-color: #fff; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden; border-radius: 4px var(--p-radius) var(--p-radius) 4px; border-left: 1px solid #e3f2fd; }
+
+/* --- ページの表面と裏面 --- */
+.pp-face {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  backface-visibility: hidden;
+  background-color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 4px var(--p-radius) var(--p-radius) 4px;
+  border-left: 1px solid #e3f2fd;
+}
 .pp-face.front { transform: rotateY(0deg); }
-.pp-face.back { transform: rotateY(180deg); border-radius: var(--p-radius) 4px 4px var(--p-radius); border-left: none; border-right: 1px solid #e3f2fd; background-color: #fafafa; }
+.pp-face.back {
+  transform: rotateY(180deg);
+  border-radius: var(--p-radius) 4px 4px var(--p-radius);
+  border-left: none;
+  border-right: 1px solid #e3f2fd;
+  background-color: #fafafa;
+}
+
+/* --- ページ上の装飾パターン（丸とバー） --- */
 .pattern-dot { position: absolute; border-radius: 50%; }
 .pattern-bar { position: absolute; height: 5px; background-color: #e3f2fd; border-radius: 10px; }
-.design-1 .pattern-dot.large { width: 50px; height: 50px; top: -15px; right: -15px; background-color: var(--pp-pink); opacity: 0.2; }
-.design-1 .pattern-dot.small { width: 10px; height: 10px; bottom: 25px; left: 20px; background-color: var(--pp-pink); }
-.design-1 .pattern-bar { bottom: 30px; left: 35px; width: 40%; background-color: #fce4ec; }
-.design-2 .pattern-dot.large { width: 40px; height: 40px; bottom: 20px; right: 20px; border: 3px solid var(--pp-orange); opacity: 0.3; background: transparent; }
-.design-2 .pattern-bar { top: 25px; left: 20px; width: 60%; background-color: #fbe9e7; }
+
+/* デザイン1: ピンクの丸（右上）＋バー */
+.design-1 .pattern-dot.large  { width: 50px; height: 50px; top: -15px; right: -15px; background-color: var(--pp-pink); opacity: 0.2; }
+.design-1 .pattern-dot.small  { width: 10px; height: 10px; bottom: 25px; left: 20px; background-color: var(--pp-pink); }
+.design-1 .pattern-bar        { bottom: 30px; left: 35px; width: 40%; background-color: #fce4ec; }
+
+/* デザイン2: オレンジの輪（右下）＋2本バー */
+.design-2 .pattern-dot.large  { width: 40px; height: 40px; bottom: 20px; right: 20px; border: 3px solid var(--pp-orange); opacity: 0.3; background: transparent; }
+.design-2 .pattern-bar        { top: 25px; left: 20px; width: 60%; background-color: #fbe9e7; }
 .design-2 .pattern-bar:nth-child(3) { top: 35px; width: 40%; }
-.design-3 .pattern-dot.large { width: 60px; height: 60px; top: 20px; left: -20px; background-color: var(--pp-cyan); opacity: 0.15; }
-.design-3 .pattern-dot.small { width: 12px; height: 12px; top: 25px; right: 25px; background-color: var(--pp-cyan); }
+
+/* デザイン3: シアンの大丸（左上）＋小丸（右上） */
+.design-3 .pattern-dot.large  { width: 60px; height: 60px; top: 20px; left: -20px; background-color: var(--pp-cyan); opacity: 0.15; }
+.design-3 .pattern-dot.small  { width: 12px; height: 12px; top: 25px; right: 25px; background-color: var(--pp-cyan); }
+
+/* --- ページめくりアニメーション（3枚が時間差でめくれる） --- */
 .flipping-page:nth-child(4) { animation: pageFlipLoop 5s linear infinite; animation-delay: 0s; }
 .flipping-page:nth-child(5) { animation: pageFlipLoop 5s linear infinite; animation-delay: 1.66s; }
 .flipping-page:nth-child(6) { animation: pageFlipLoop 5s linear infinite; animation-delay: 3.33s; }
+
 @keyframes pageFlipLoop {
-  0% { transform: rotateY(0deg) translateZ(1px); z-index: 10; }
-  15% { transform: rotateY(-30deg) translateZ(10px); animation-timing-function: ease-in; }
-  35% { transform: rotateY(-179.9deg) translateZ(1px); z-index: 10; }
-  36% { transform: rotateY(0deg) translateZ(0px); z-index: 1; opacity: 0; }
-  45% { opacity: 0; }
+  0%   { transform: rotateY(0deg) translateZ(1px); z-index: 10; }
+  15%  { transform: rotateY(-30deg) translateZ(10px); animation-timing-function: ease-in; }
+  35%  { transform: rotateY(-179.9deg) translateZ(1px); z-index: 10; }
+  36%  { transform: rotateY(0deg) translateZ(0px); z-index: 1; opacity: 0; }
+  45%  { opacity: 0; }
   100% { opacity: 1; transform: rotateY(0deg) translateZ(0px); z-index: 1; }
 }
-.loading-container { margin-top: 30px; text-align: center; transform: translateZ(50px); }
-.loading-label { font-size: 1.1rem; font-weight: 800; color: #546e7a; margin-bottom: 4px; font-family: 'M PLUS Rounded 1c', sans-serif; }
-.loading-subtext { font-size: 0.85rem; color: #90a4ae; font-family: 'Zen Maru Gothic', sans-serif; }
 
-/* =========================================
-   3. アプリケーション本体
-   ========================================= */
-body { font-family: "Zen Maru Gothic", sans-serif; color: var(--text-main); background-color: var(--bg-body); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-header.navbar { flex-shrink: 0; background-color: var(--bg-card) !important; border-bottom: 1px solid var(--border-color); z-index: 1030; box-shadow: var(--shadow-sm); }
-.flex-grow-1 { display: flex; overflow: hidden; }
-#sidebar { width: 320px; min-width: 320px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; z-index: 1020; }
-main { flex-grow: 1; background-color: var(--bg-body); position: relative; display: flex; flex-direction: column; overflow: hidden; }
-footer { flex-shrink: 0; background-color: var(--bg-card); border-top: 1px solid var(--border-color); z-index: 1040; }
-
-/* ステータスアラートスタイル (追加) */
-@keyframes pulse { from {transform:scale3d(1,1,1);} 50% {transform:scale3d(1.05,1.05,1.05);} to {transform:scale3d(1,1,1);} }
-.sos-alert {
-  border: 2px solid var(--color-danger) !important;
-  background-color: rgba(234, 67, 53, 0.05); /* 薄い赤背景 */
-  animation: pulse 1.5s infinite;
+/* --- ローディングテキスト（パスポートの下に表示） --- */
+.loading-container {
+  margin-top: 30px;
+  text-align: center;
+  transform: translateZ(50px);
 }
-.focus-alert {
-  border: 2px solid var(--color-info) !important;
-  background-color: rgba(66, 133, 244, 0.05); /* 薄い青背景 */
+.loading-label {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #546e7a;
+  margin-bottom: 4px;
+  font-family: 'M PLUS Rounded 1c', sans-serif;
+}
+.loading-subtext {
+  font-size: 0.85rem;
+  color: #90a4ae;
+  font-family: 'Zen Maru Gothic', sans-serif;
 }
 
-/* ヘッダーのレスポンシブ対応 (追加) */
-@media (max-width: 576px) {
-  .navbar-brand span { display: none; } /* スマホではタイトル文字を隠す */
-  #studentNameInput { width: 80px !important; }
-  .btn-group .btn { padding-left: 0.5rem; padding-right: 0.5rem; }
-  .navbar .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
-  .ms-4.d-flex { margin-left: 0.5rem !important; } /* モード切替ボタンのマージン縮小 */
+
+/* ============================================================
+ *  3. アプリ全体レイアウト
+ *  ※ ヘッダー（上）・サイドバー（左）・メイン（中央）・フッター（下）の配置
+ * ============================================================ */
+
+/* --- ページ全体 --- */
+body {
+  font-family: "Zen Maru Gothic", sans-serif;
+  color: var(--text-main);
+  background-color: var(--bg-body);
+  height: 100vh;            /* 画面いっぱいに広げる */
+  display: flex;
+  flex-direction: column;   /* 縦に積む */
+  overflow: hidden;         /* はみ出しを防ぐ */
 }
 
-/* =========================================
-   4. エディタ & ワークシート
-   ========================================= */
-#editorToolbar { flex-shrink: 0; margin: 1rem; padding: 0.5rem 1rem; background-color: var(--bg-card); border-radius: 50rem; box-shadow: var(--shadow-sm); display: flex; gap: 0.5rem; align-items: center; z-index: 100; }
-.sheet-scroll-area { flex-grow: 1; overflow-y: auto; padding: 0 1rem 4rem 1rem; display: flex; justify-content: center; align-items: flex-start; }
-.sheet-container { width: 210mm; margin-top: 1rem; position: relative; }
-
-/* シート設定 */
-.sheet { 
-  background: white; 
-  width: 100%; 
-  min-height: 297mm; 
-  padding: 10mm; 
-  box-shadow: var(--shadow-md); 
-  box-sizing: border-box; 
-  position: relative; 
-  z-index: 1; 
-}
-#worksheetContent { outline: none; font-size: 12pt; line-height: 1.6; color: #2c3e50; position: relative; z-index: 2; min-height: 100%; }
-.canvas-container { position: absolute !important; top: 0; left: 0; z-index: 10; pointer-events: auto; }
-
-/* =========================================
-   5. AI生成ワークシート & 編集機能
-   ========================================= */
-.ws-sheet { background: transparent; width: 100%; height: 100%; display: flex; flex-direction: column; font-feature-settings: "palt"; }
-
-/* ヘッダー・フッター・コンテンツ */
-.ws-header-fixed { 
-  border-bottom: 1px solid var(--ws-border-strong); 
-  padding-bottom: 5px; 
-  margin-bottom: 10px; 
-  display: flex; 
-  justify-content: space-between; 
-  align-items: flex-end; 
+/* --- ヘッダー（ナビゲーションバー） --- */
+header.navbar {
+  flex-shrink: 0;           /* 高さを固定 */
+  background-color: var(--bg-card) !important;
+  border-bottom: 1px solid var(--border-color);
+  z-index: 1030;
+  box-shadow: var(--shadow-sm);
 }
 
-.ws-header-left { display: flex; flex-direction: column; gap: 2px; }
-.ws-date-small { font-size: 0.75rem; color: #666; margin-bottom: 2px; }
-.ws-info-group { display: flex; flex-direction: column; gap: 2px; }
-.ws-unit-name { font-size: 0.8rem; color: #666; background: #f0f0f0; padding: 1px 6px; border-radius: 4px; display: inline-block; }
-.ws-title { font-size: 1.3rem; font-weight: bold; margin: 0; line-height: 1.1; color: var(--text-main); border: none; }
-
-.ws-meta-table { border-collapse: collapse; font-size: 0.8rem; margin-bottom: 2px; }
-.ws-meta-table td { border: 1px solid var(--ws-border-strong); padding: 4px 10px; text-align: center; }
-.ws-meta-label { background: #eee; font-weight: bold; width: 40px; }
-.ws-meta-input { min-width: 80px; height: 1.4em; }
-
-/* コンテンツエリアの基本設定 */
-.ws-content { 
-  flex: 1; 
-  padding: 5px 0; 
-  position: relative; 
+/* --- ヘッダー以下の横並びエリア（サイドバー + メイン） --- */
+.flex-grow-1 {
+  display: flex;
+  overflow: hidden;
 }
 
-.ws-footer-fixed { border-top: 1px solid var(--ws-border-strong); padding-top: 5px; margin-top: auto; font-size: 0.8rem; }
-.ws-assessment-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
-.ws-reflection-box { border: 1px solid var(--ws-border-strong); border-radius: 4px; padding: 5px; }
-.ws-reflection-title { font-weight: bold; font-size: 0.8rem; display: block; margin-bottom: 2px; background: #eee; padding: 1px 4px; }
-.ws-rubric-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
-.ws-rubric-table th, .ws-rubric-table td { border: 1px solid #999; padding: 2px; text-align: center; }
-.ws-rubric-table th { background: #f0f0f0; }
-
-.rubric-emoji th { background: #e3f2fd !important; font-weight: bold; }
-.rubric-label { text-align: left !important; padding-left: 8px !important; font-weight: bold; vertical-align: middle; width: 60%; }
-.rubric-scale { font-size: 1.1rem; letter-spacing: 0.3em; vertical-align: middle; white-space: nowrap; text-align: center !important; }
-.tiny-text { font-size: 0.7em; color: #666; font-weight: normal; margin-left: 5px;}
-
-/* ★★★ 修正: 教科別モードの最適化 ★★★ */
-
-/* 国語 (縦書き) */
-.mode-kokugo {
-  font-family: "Zen Old Mincho", "Noto Serif JP", serif; /* 明朝体で雰囲気統一 */
-}
-
-.mode-kokugo .ws-content { 
-  writing-mode: vertical-rl; 
-  text-orientation: upright; 
-  /* 高さ（縦書きの行長）を用紙いっぱいに使う */
-  height: 100%; 
-  min-height: 500px;
-  /* 右寄せ配置 */
+/* --- サイドバー（先生モードの左パネル：授業リスト・履歴） --- */
+#sidebar {
+  width: 320px;
+  min-width: 320px;
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  align-items: flex-start; /* 縦書きではこれが上（右）端になる */
-  
-  /* スクロールバーを出さない */
-  overflow: hidden; 
-  padding-right: 0;
+  z-index: 1020;
 }
 
-.mode-kokugo .ws-box { 
-  margin: 0 10px; 
-  border: 1px solid #555; 
-  /* 縦書きモードでのボックス幅調整 */
-  width: 90%; 
+/* --- メインエリア（ワークシート表示・編集スペース） --- */
+main {
+  flex-grow: 1;             /* 残りの横幅をすべて使う */
+  background-color: var(--bg-body);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* --- フッター --- */
+footer {
+  flex-shrink: 0;
+  background-color: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  z-index: 1040;
+}
+
+
+/* ============================================================
+ *  4. ステータス表示（児童のSOS・集中モード）
+ *  ※ 児童がSOS/集中ボタンを押すと、用紙の枠が光る
+ * ============================================================ */
+
+/* SOS発信中: 赤い枠 + 拡大パルスアニメーション */
+@keyframes pulse {
+  from { transform: scale3d(1,1,1); }
+  50%  { transform: scale3d(1.05,1.05,1.05); }
+  to   { transform: scale3d(1,1,1); }
+}
+.sos-alert {
+  border: 2px solid var(--color-danger) !important;
+  background-color: rgba(234, 67, 53, 0.05);  /* 薄い赤背景 */
+  animation: pulse 1.5s infinite;
+}
+
+/* 集中モード中: 青い枠（アニメーションなし） */
+.focus-alert {
+  border: 2px solid var(--color-info) !important;
+  background-color: rgba(66, 133, 244, 0.05);  /* 薄い青背景 */
+}
+
+
+/* ============================================================
+ *  5. レスポンシブ対応（小さい画面・Chromebookへの最適化）
+ * ============================================================ */
+@media (max-width: 576px) {
+  /* スマホではタイトル文字を隠す（アイコンだけ残す） */
+  .navbar-brand span { display: none; }
+
+  /* 名前入力欄を小さくする */
+  #studentNameInput { width: 80px !important; }
+
+  /* ボタンの左右の余白を縮小 */
+  .btn-group .btn { padding-left: 0.5rem; padding-right: 0.5rem; }
+  .navbar .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+
+  /* モード切替ボタンのマージン縮小 */
+  .ms-4.d-flex { margin-left: 0.5rem !important; }
+}
+
+
+/* ============================================================
+ *  6. エディタ & ワークシート用紙
+ *  ※ ワークシートの編集画面で、A4サイズの用紙を表示する
+ * ============================================================ */
+
+/* --- ツールバー（用紙の上にある丸い操作バー） --- */
+#editorToolbar {
+  flex-shrink: 0;
+  margin: 1rem;
+  padding: 0.5rem 1rem;
+  background-color: var(--bg-card);
+  border-radius: 50rem;       /* 丸くする */
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  z-index: 100;
+}
+
+/* --- 用紙のスクロール可能エリア --- */
+.sheet-scroll-area {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 0 1rem 4rem 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* --- 用紙コンテナ（A4横幅 = 210mm） --- */
+.sheet-container {
+  width: 210mm;
+  margin-top: 1rem;
+  position: relative;
+}
+
+/* --- A4用紙本体（白い紙に影つき） --- */
+.sheet {
+  background: white;
+  width: 100%;
+  min-height: 297mm;          /* A4の縦サイズ */
+  padding: 10mm;
+  box-shadow: var(--shadow-md);
+  box-sizing: border-box;
+  position: relative;
+  z-index: 1;
+}
+
+/* --- ワークシートの本文エリア --- */
+#worksheetContent {
+  outline: none;              /* 編集枠線を消す */
+  font-size: 12pt;
+  line-height: 1.6;
+  color: #2c3e50;
+  position: relative;
+  z-index: 2;
+  min-height: 100%;
+}
+
+/* --- 手書きキャンバス（用紙の上に重なる透明レイヤー） --- */
+.canvas-container {
+  position: absolute !important;
+  top: 0; left: 0;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+
+/* ============================================================
+ *  7. AI生成ワークシートの部品スタイル
+ *  ※ AIが自動生成するHTMLワークシート内で使われるクラス
+ * ============================================================ */
+
+/* --- ワークシート全体の枠 --- */
+.ws-sheet {
+  background: transparent;
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-feature-settings: "palt";  /* 日本語のプロポーショナル字詰め */
+}
+
+/* --- ヘッダー（上部の罫線区切り：単元名・名前欄） --- */
+.ws-header-fixed {
+  border-bottom: 1px solid var(--ws-border-strong);
+  padding-bottom: 5px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.ws-header-left { display: flex; flex-direction: column; gap: 2px; }
+.ws-date-small  { font-size: 0.75rem; color: #666; margin-bottom: 2px; }
+.ws-info-group  { display: flex; flex-direction: column; gap: 2px; }
+.ws-unit-name   { font-size: 0.8rem; color: #666; background: #f0f0f0; padding: 1px 6px; border-radius: 4px; display: inline-block; }
+.ws-title       { font-size: 1.3rem; font-weight: bold; margin: 0; line-height: 1.1; color: var(--text-main); border: none; }
+
+/* --- メタ情報テーブル（年・組・名前のマス目） --- */
+.ws-meta-table        { border-collapse: collapse; font-size: 0.8rem; margin-bottom: 2px; }
+.ws-meta-table td     { border: 1px solid var(--ws-border-strong); padding: 4px 10px; text-align: center; }
+.ws-meta-label        { background: #eee; font-weight: bold; width: 40px; }
+.ws-meta-input        { min-width: 80px; height: 1.4em; }
+
+/* --- 本文コンテンツエリア --- */
+.ws-content {
+  flex: 1;
+  padding: 5px 0;
+  position: relative;
+}
+
+/* --- フッター（ふりかえり・自己評価エリア） --- */
+.ws-footer-fixed      { border-top: 1px solid var(--ws-border-strong); padding-top: 5px; margin-top: auto; font-size: 0.8rem; }
+.ws-assessment-grid   { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+.ws-reflection-box    { border: 1px solid var(--ws-border-strong); border-radius: 4px; padding: 5px; }
+.ws-reflection-title  { font-weight: bold; font-size: 0.8rem; display: block; margin-bottom: 2px; background: #eee; padding: 1px 4px; }
+
+/* --- ルーブリック（評価基準表） --- */
+.ws-rubric-table      { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.ws-rubric-table th,
+.ws-rubric-table td   { border: 1px solid #999; padding: 2px; text-align: center; }
+.ws-rubric-table th   { background: #f0f0f0; }
+
+/* ルーブリックの絵文字ヘッダー行（◎ ○ △ の行） */
+.rubric-emoji th      { background: #e3f2fd !important; font-weight: bold; }
+.rubric-label         { text-align: left !important; padding-left: 8px !important; font-weight: bold; vertical-align: middle; width: 60%; }
+.rubric-scale         { font-size: 1.1rem; letter-spacing: 0.3em; vertical-align: middle; white-space: nowrap; text-align: center !important; }
+.tiny-text            { font-size: 0.7em; color: #666; font-weight: normal; margin-left: 5px; }
+
+
+/* ============================================================
+ *  8. 教科別モード
+ *  ※ 国語（縦書き）・算数（マス目）など教科に応じた表示切替
+ * ============================================================ */
+
+/* --- 国語モード（縦書き）--- */
+.mode-kokugo {
+  font-family: "Zen Old Mincho", "Noto Serif JP", serif;  /* 明朝体 */
+}
+.mode-kokugo .ws-content {
+  writing-mode: vertical-rl;      /* 縦書き・右から左 */
+  text-orientation: upright;      /* 文字を正立させる */
+  height: 100%;
+  min-height: 500px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  overflow: hidden;
+  padding-right: 0;
+}
+.mode-kokugo .ws-box {
+  margin: 0 10px;
+  border: 1px solid #555;
+  width: 90%;
   align-self: center;
 }
 
-/* 他の教科 */
-.grid-paper { background-image: linear-gradient(var(--ws-grid-blue) 1px, transparent 1px), linear-gradient(90deg, var(--ws-grid-blue) 1px, transparent 1px); background-size: 40px 40px; border: 1px solid var(--ws-grid-blue); padding: 2px; }
-.graph-paper { background-size: 20px 20px; background-image: linear-gradient(to right, var(--ws-grid-gray) 1px, transparent 1px), linear-gradient(to bottom, var(--ws-grid-gray) 1px, transparent 1px); border: 1px solid #ccc; min-height: 150px; }
-.math-grid { display: inline-grid; grid-template-columns: repeat(auto-fit, 30px); gap: 1px; font-family: monospace; font-size: 1.5rem; text-align: center; margin: 10px; background: #fff; border: 1px solid #eee; padding: 5px; }
-.math-cell { width: 30px; height: 40px; display: flex; align-items: center; justify-content: center; }
-.math-line { grid-column: 1 / -1; height: 2px; background: #333; margin: 2px 0; }
+/* --- 方眼紙（算数・理科のメモ用） --- */
+.grid-paper {
+  background-image:
+    linear-gradient(var(--ws-grid-blue) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-grid-blue) 1px, transparent 1px);
+  background-size: 40px 40px;
+  border: 1px solid var(--ws-grid-blue);
+  padding: 2px;
+}
 
-/* ビジュアルエディタ用拡張 */
+/* --- グラフ用紙（グラフ描画用の細かいマス目） --- */
+.graph-paper {
+  background-size: 20px 20px;
+  background-image:
+    linear-gradient(to right, var(--ws-grid-gray) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--ws-grid-gray) 1px, transparent 1px);
+  border: 1px solid #ccc;
+  min-height: 150px;
+}
+
+/* --- 算数マス目（筆算用のセル） --- */
+.math-grid {
+  display: inline-grid;
+  grid-template-columns: repeat(auto-fit, 30px);
+  gap: 1px;
+  font-family: monospace;
+  font-size: 1.5rem;
+  text-align: center;
+  margin: 10px;
+  background: #fff;
+  border: 1px solid #eee;
+  padding: 5px;
+}
+.math-cell {
+  width: 30px; height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.math-line {
+  grid-column: 1 / -1;     /* 全列にまたがる横線 */
+  height: 2px;
+  background: #333;
+  margin: 2px 0;
+}
+
+
+/* ============================================================
+ *  9. ビジュアルエディタ（先生モードの編集補助機能）
+ * ============================================================ */
+
+/* --- 記述欄・罫線ボックスはリサイズ可能にする --- */
 .ws-box, .ws-lines, .ws-instruction {
   resize: vertical;
   overflow: auto;
@@ -219,17 +547,17 @@ footer { flex-shrink: 0; background-color: var(--bg-card); border-top: 1px solid
   min-height: 50px;
 }
 
-/* 選択中の要素ハイライト */
+/* --- 選択中の要素にハイライト表示 --- */
 .ws-active-element {
   outline: 2px dashed var(--color-primary);
   outline-offset: 2px;
   background-color: rgba(26, 115, 232, 0.05);
 }
 
-/* コンテキストメニュー */
+/* --- 右クリックメニュー（テーブル操作・ボックス複製など） --- */
 #contextMenu {
-  position: fixed; 
-  z-index: 1050;   
+  position: fixed;
+  z-index: 1050;
   background: white;
   border: 1px solid #ccc;
   box-shadow: 0 4px 15px rgba(0,0,0,0.2);
@@ -247,50 +575,108 @@ footer { flex-shrink: 0; background-color: var(--bg-card); border-top: 1px solid
   border: none;
   background: transparent;
   border-radius: 4px;
-  display: flex; align-items: center; gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
 }
 #contextMenu button:hover {
   background-color: #f0f0f0;
   color: var(--color-primary);
 }
-#contextMenu hr { margin: 4px 0; border-top: 1px solid #eee; }
+#contextMenu hr {
+  margin: 4px 0;
+  border-top: 1px solid #eee;
+}
 
-/* ユーティリティ & 印刷 */
+
+/* ============================================================
+ *  10. 児童モード専用スタイル & ユーティリティ
+ * ============================================================ */
+
+/* --- ボタンの角を丸くする（全体共通） --- */
 .btn { border-radius: 50rem; font-weight: 500; }
-.list-group-item.active { background-color: #e8f0fe; border-color: transparent; color: var(--color-primary); font-weight: bold; }
-.list-group-item.active .text-muted { color: var(--color-primary) !important; opacity: 0.7; }
-body.student-mode header.navbar { background-color: #e8f5e9 !important; border-bottom: 1px solid #c8e6c9; }
-body.student-mode .navbar-brand { color: #2e7d32 !important; }
-body.student-mode #sidebar { display: none !important; }
-body.student-mode main { background-color: #f1f8e9; }
+
+/* --- サイドバーの選択中アイテム（青いハイライト） --- */
+.list-group-item.active {
+  background-color: #e8f0fe;
+  border-color: transparent;
+  color: var(--color-primary);
+  font-weight: bold;
+}
+.list-group-item.active .text-muted {
+  color: var(--color-primary) !important;
+  opacity: 0.7;
+}
+
+/* --- 児童モード: ヘッダーを緑色に変える --- */
+body.student-mode header.navbar {
+  background-color: #e8f5e9 !important;   /* 薄い緑 */
+  border-bottom: 1px solid #c8e6c9;
+}
+body.student-mode .navbar-brand {
+  color: #2e7d32 !important;              /* 濃い緑の文字 */
+}
+
+/* --- 児童モード: サイドバーを非表示 --- */
+body.student-mode #sidebar {
+  display: none !important;
+}
+
+/* --- 児童モード: メインエリアの背景を薄緑に --- */
+body.student-mode main {
+  background-color: #f1f8e9;
+}
+
+
+/* ============================================================
+ *  11. 印刷用スタイル（@media print）
+ *  ※ ブラウザの「印刷」やPDF出力時に適用される
+ *  ※ UIを全て隠して、A4用紙にワークシートだけを印刷する
+ * ============================================================ */
 @media print {
+  /* すべてを非表示にする */
   body * { visibility: hidden; }
-  .sheet-container, .sheet-container * { visibility: visible; }
-  .sheet-container { 
-    position: absolute; left: 0; top: 0; 
-    width: 100%; margin: 0; 
-    box-shadow: none; 
-    padding: 8mm; 
+
+  /* 用紙コンテナとその子要素だけ表示する */
+  .sheet-container,
+  .sheet-container * { visibility: visible; }
+  .sheet-container {
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%;
+    margin: 0;
+    box-shadow: none;
+    padding: 8mm;
   }
-  
+
+  /* 用紙を画面いっぱいに広げる */
   .sheet {
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 10mm !important; 
+    padding: 10mm !important;
     box-shadow: none !important;
     border: none !important;
-    min-height: 297mm; 
+    min-height: 297mm;
   }
 
-  #sidebar, header, #editorToolbar, footer, #loadingOverlay, #contextMenu, .btn-float { display: none !important; }
-  
-  @page { 
-    size: A4 portrait; 
-    margin: 0; 
+  /* 不要なUI要素をすべて非表示 */
+  #sidebar, header, #editorToolbar, footer,
+  #loadingOverlay, #contextMenu, .btn-float {
+    display: none !important;
   }
-  
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  /* A4縦の用紙設定（余白なし） */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  /* 背景色・画像を印刷に反映する */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }
 </style>
