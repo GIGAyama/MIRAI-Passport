@@ -759,7 +759,7 @@ function generateSingleWorksheet(data) {
     + '2. 以下のセクションを必ず含める：\n'
     + '   - 「今日のめあて」（活動内容から具体化）\n'
     + '   - 「AIヒント・ポイント」（この活動でつまずきやすい点や、考えるコツをAIコーチとして助言）\n'
-    + '   - 「考えを書くスペース」（<div contenteditable="true" class="rich-editor"></div> を使用）\n'
+    + '   - 「考えを書くスペース」（<div class="ws-answer" style="border:1px solid #aaa; border-radius:6px; padding:10px; min-height:3em; background:#fffde7;"></div> を使用。問題文には ws-answer を付けないこと）\n'
     + '   - 「自己評価」（3段階のスタンプ選択など）\n'
     + '3. スタイルはBootstrap 5のクラス（card, p-3, mb-3, bg-lightなど）を活用。\n'
     + '4. HTMLの「body内部」のみを出力すること。余計な解説や```htmlタグは不要。';

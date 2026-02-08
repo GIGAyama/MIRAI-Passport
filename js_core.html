@@ -394,6 +394,23 @@ const App = {
   },
 
   /**
+   * 【児童モード】ワークシート内の入力欄を編集可能にする
+   *
+   * worksheetContent 全体は contenteditable="false" のまま、
+   * 入力用のクラス（ws-box, ws-lines, rich-editor, ws-answer）を持つ要素だけを
+   * contenteditable="true" にして、児童がタイピングできるようにする。
+   * ふりかえり欄（ws-lines）も対象。
+   */
+  enableStudentInputs: () => {
+    var ws = document.getElementById('worksheetContent');
+    if (!ws) return;
+    var inputs = ws.querySelectorAll('.ws-box, .ws-lines, .rich-editor, .ws-answer, [contenteditable="true"]');
+    for (var i = 0; i < inputs.length; i++) {
+      inputs[i].contentEditable = 'true';
+    }
+  },
+
+  /**
    * タスクを選択してワークシートを表示する（メインのタスク切替処理）
    *
    * 1. State を更新し、UIを表示状態にする
@@ -433,6 +450,8 @@ const App = {
 
         // 【児童モード】手書きを起動し、前回の回答を復元する
         if (State.mode === 'student') {
+          // 入力欄（ws-box, ws-lines, rich-editor 等）のみ編集可能にする
+          App.enableStudentInputs();
           setTimeout(async () => {
             App.toggleDrawMode(true);
             // 自分の前回の回答を読み込む（js_student.html で定義）
@@ -558,6 +577,8 @@ const App = {
         }
 
         if (State.mode === 'student') {
+          // 入力欄（ws-box, ws-lines, rich-editor 等）のみ編集可能にする
+          App.enableStudentInputs();
           setTimeout(async () => {
             App.toggleDrawMode(true);
             if (typeof App.loadMyResponse === 'function') await App.loadMyResponse();

@@ -628,6 +628,30 @@ body.student-mode main {
   background-color: #f1f8e9;
 }
 
+/* --- 児童モード: 入力欄（ws-answer）のスタイル --- */
+/* 児童がタイピングできる欄を視覚的に区別する */
+body.student-mode .ws-answer {
+  border: 1.5px solid #bdbdbd;
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-height: 2.5em;
+  background: #fffde7;           /* 薄い黄色で「ここに書く」と分かる */
+  cursor: text;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+body.student-mode .ws-answer:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+  background: #fff;
+}
+body.student-mode .ws-answer:empty::before {
+  content: "ここに入力...";
+  color: #bbb;
+  font-style: italic;
+  pointer-events: none;
+}
+
 
 /* ============================================================
  *  11. 印刷用スタイル（@media print）
