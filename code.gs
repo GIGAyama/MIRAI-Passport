@@ -868,7 +868,14 @@ function consumeImportQueue(importId) {
     var result = handleImportUnitPlan(foundData);
     // 処理済みキューを削除
     sheet.deleteRow(deleteRowIndex);
-    return { success: true, taskIds: result.taskIds, message: result.message };
+    return {
+      success: true,
+      taskIds: result.taskIds,
+      tasks: result.tasks || [],
+      unitName: foundData.unitName || "",
+      grade: foundData.grade || "",
+      message: result.message
+    };
   }
   return { success: false, message: "データが見つかりません" };
 }
@@ -943,6 +950,7 @@ function handleImportUnitPlan(data) {
 
   return {
     taskIds: addedTaskIds,
+    tasks: data.tasks || [],
     message: inserts.length + '件追加、' + updates.length + '件更新'
   };
 }

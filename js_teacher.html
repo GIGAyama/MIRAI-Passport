@@ -578,13 +578,29 @@ Object.assign(App, {
       var res = await Server.call('consumeImportQueue', importId);
 
       if (res.success) {
-        // unitData を構成
+        // --- タスク詳細を構成（コンパスから受け取った情報を活用） ---
+        var taskDetails = [];
+        for (var i = 0; i < res.taskIds.length; i++) {
+          var taskId = res.taskIds[i];
+          // res.tasks にコンパスから送られたタスク情報がある場合はマージ
+          var srcTask = (res.tasks && res.tasks[i]) ? res.tasks[i] : {};
+          taskDetails.push({
+            id: taskId,
+            taskId: taskId,
+            title: srcTask.title || "無題",
+            description: srcTask.description || ""
+          });
+        }
+
         State.unitData = {
-          unitInfo: { unitName: res.unitName || "連携単元" },
-          tasks: res.taskIds.map(function(id) {
-            return { id: id, title: "読み込み中..." };
-          })
+          unitInfo: { unitName: res.unitName || "連携単元", grade: res.grade || "" },
+          tasks: taskDetails
         };
+
+        // サイドバーにタスク一覧を表示
+        App.renderTaskList();
+
+        UI.hideLoading();
 
         // AI一括生成するか確認
         Swal.fire({
@@ -597,9 +613,6 @@ Object.assign(App, {
         }).then(function(result) {
           if (result.isConfirmed) {
             App.startBatchGeneration(res.taskIds);
-          } else {
-            // 手動作成: 通常画面へリロード
-            window.location.href = window.location.pathname + "?mode=teacher";
           }
         });
       } else {

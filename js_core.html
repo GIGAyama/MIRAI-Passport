@@ -293,7 +293,8 @@ const App = {
       || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.studentId : '');
     var studentName = params.get('studentName')
       || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.studentName : '');
-    var importId    = params.get('importId') || '';
+    var importId    = params.get('importId')
+      || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.importId : '');
 
     // --- 自己評価スタンプのクリック処理（両モード共通） ---
     // ワークシート内の ◎ ○ △ ボタンをクリックすると選択状態になる
