@@ -233,7 +233,13 @@
           <!-- 教師モード専用ツール -->
           <? if (mode === 'teacher') { ?>
             <div class="vr"></div>
-            <button class="btn btn-sm btn-outline-primary rounded-pill" onclick="App.generateSingleWorksheet()">再生成</button>
+            <div class="dropdown">
+              <button class="btn btn-sm btn-outline-primary rounded-pill dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-stars me-1"></i>AI作成</button>
+              <ul class="dropdown-menu">
+                <li><button class="dropdown-item" onclick="App.generateSingleWorksheet()"><i class="bi bi-lightning-fill text-warning me-2"></i>API自動生成</button></li>
+                <li><button class="dropdown-item" onclick="App.openManualAiModal()"><i class="bi bi-clipboard-plus text-primary me-2"></i>手動AI（コピペ）</button></li>
+              </ul>
+            </div>
             <button class="btn btn-sm btn-outline-warning text-dark rounded-pill" onclick="Modals.openRubric()"><i class="bi bi-grid-3x3"></i> 評価</button>
             <button class="btn btn-sm btn-outline-info text-dark rounded-pill" onclick="Modals.openDashboard()"><i class="bi bi-people-fill"></i> 提出</button>
             <div class="dropdown">

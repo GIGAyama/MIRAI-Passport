@@ -567,7 +567,277 @@ Object.assign(App, {
    *
    * Gemini AI を使ってワークシートのHTML本文を自動生成する。
    * 単体生成（選択中のタスク1件）と一括生成（複数タスク）に対応。
+   *
+   * ■ API自動生成: generateSingleWorksheet — Gemini API 直接呼び出し
+   * ■ 手動AI生成:  openManualAiModal — プロンプトをコピーして外部AIに貼り付け
    */
+
+  /**
+   * ワークシート生成用のプロンプト文字列を構築する（共通処理）
+   *
+   * API自動生成・手動AI生成の両方で同じプロンプトを使うため切り出し。
+   * 選択中のタスクと単元情報からプロンプトを組み立てる。
+   *
+   * @return {string} AI に送信するプロンプト文字列
+   */
+  buildWsPrompt: () => {
+    var info        = State.unitData ? (State.unitData.unitInfo || {}) : { grade: "", unitName: "" };
+    var description = State.currentTask.description || "";
+
+    // OCR テキストがあれば追加コンテキストとして挿入
+    var extraContext = "";
+    if (State.ocrCache) {
+      extraContext = '\n【参考資料テキスト】\n' + State.ocrCache.substring(0, 1500)
+        + '...\n※この資料の内容を授業に反映させてください。';
+    }
+
+    return 'あなたは日本の小学校教師です。以下の授業情報から、児童が自立的に取り組むためのワークシートHTMLを作成してください。\n\n'
+      + '【授業情報】\n'
+      + '学年: ' + (info.grade || '') + '\n'
+      + '単元名: ' + (info.unitName || '') + '\n'
+      + '授業タイトル: ' + State.currentTask.title + '\n'
+      + '活動内容: ' + description + '\n'
+      + extraContext + '\n\n'
+      + '【出力HTMLの構成（厳守）】\n'
+      + '以下の構造を使用し、AIコーチング要素（ヒント、めあて）を盛り込んでください。\n'
+      + 'Markdown記法は禁止です。\n\n'
+      + '【重要な制約】\n'
+      + '- 外部画像URL（img src="https://..."）は絶対に使用禁止です。via.placeholder.com 等の外部サービスも禁止です。\n'
+      + '- 図形・図表が必要な場合は、HTML/CSSのみで描画してください（div + border, SVGインライン, CSS shapes, tableなど）。\n'
+      + '- 例: 三角形 → <div style="width:0;height:0;border-left:40px solid transparent;border-right:40px solid transparent;border-bottom:60px solid #333;"></div>\n'
+      + '- 例: 円 → <div style="width:80px;height:80px;border-radius:50%;border:2px solid #333;"></div>\n'
+      + '- 例: 方眼・表 → <table> を使用\n\n'
+      // ヘッダー部分のテンプレート
+      + '<!-- 1. ヘッダー -->\n'
+      + '<div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px; font-family: \'Zen Maru Gothic\', sans-serif;">\n'
+      + '   <div><span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7em; margin-right:5px;">' + (info.grade || '') + '</span>'
+      + '<span style="font-weight:bold;">' + (info.unitName || '') + '</span></div>\n'
+      + '   <div style="text-align:right;">年 組 名前 __________________</div>\n'
+      + '</div>\n\n'
+      // タイトル & めあて
+      + '<!-- 2. タイトル & めあて -->\n'
+      + '<h1 style="text-align:center; font-size:1.8em; margin-bottom:20px;">' + State.currentTask.title + '</h1>\n'
+      + '<div style="background:#e3f2fd; padding:10px; border-radius:8px; margin-bottom:20px; border-left:5px solid #2196f3;">\n'
+      + '   <strong>今日のめあて:</strong> (活動内容から子供向けのめあてを生成)\n'
+      + '</div>\n\n'
+      // AIヒント
+      + '<!-- 3. AIヒント (Coaching) -->\n'
+      + '<div style="background:#fff3e0; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.9em; color:#e65100;">\n'
+      + '   <strong><i class="bi bi-lightbulb-fill"></i> AIコーチのヒント:</strong>\n'
+      + '   (この活動でつまずきやすい点や、考えるためのヒントを1-2行で記述)\n'
+      + '</div>\n\n'
+      // 本文エリア
+      + '<!-- 4. 本文エリア -->\n'
+      + '<!-- 児童が入力する記述欄には必ず class="ws-answer" を付けてください。 -->\n'
+      + '<!-- 問題文・指示文は通常のdiv/pで記述し、ws-answer は付けないでください。 -->\n'
+      + '<div style="min-height: 350px;">\n'
+      + '  (学習課題・問い・記述欄を生成。\n'
+      + '   問題文: 通常の div や p で記述\n'
+      + '   入力欄: <div class="ws-answer" style="border:1px solid #aaa; border-radius:6px; padding:10px; min-height:3em; margin:8px 0; background:#fffde7;"></div>\n'
+      + '   罫線付き入力欄: <div class="ws-answer ws-lines" style="min-height:4em; background-image:linear-gradient(#ccc 1px, transparent 1px); background-size:100% 1.5em; padding:4px 8px;"></div>\n'
+      + '   各設問ごとに ws-answer の入力欄を設けてください)\n'
+      + '</div>\n\n'
+      // フッター
+      + '<!-- 5. フッター -->\n'
+      + '<div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">\n'
+      + '  <div style="flex: 6;">\n'
+      + '    <div style="font-weight:bold; font-size:0.9em;">■ ふりかえり</div>\n'
+      + '    <div class="ws-answer ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em;"></div>\n'
+      + '  </div>\n'
+      + '  <div style="flex: 4;">\n'
+      + '    <div style="font-weight:bold; font-size:0.9em;">■ 自己評価</div>\n'
+      + '    <table class="table table-bordered table-sm mb-0" style="font-size: 0.85em; text-align:center;">\n'
+      + '      <tr><td class="bg-light" style="width:40%;">わかった</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + '      <tr><td class="bg-light">考えた</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + '      <tr><td class="bg-light">進んで</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + '    </table>\n'
+      + '  </div>\n'
+      + '</div>';
+  },
+
+  /**
+   * 手動AI生成モーダルを開く（3ステップ構成）
+   *
+   * API キーがない環境でも外部 AI（ChatGPT / Gemini 等）を
+   * 手動コピペで利用してワークシートを作成できるようにする。
+   *
+   * Step 1: 授業情報JSONをコピー（AIへの入力素材）
+   * Step 2: ワークシート生成プロンプトをコピー（編集可）
+   * Step 3: AI出力HTMLを貼り付けて保存
+   */
+  openManualAiModal: () => {
+    if (!State.currentTask) {
+      return Swal.fire('エラー', '先にサイドバーから授業を選択してください。', 'warning');
+    }
+
+    // --- Step 1 用: 授業情報JSON ---
+    var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
+    var taskInfoJson = JSON.stringify({
+      grade:       info.grade    || '',
+      subject:     info.subject  || '',
+      unitName:    info.unitName || '',
+      taskTitle:   State.currentTask.title       || '',
+      description: State.currentTask.description || '',
+      category:    State.currentTask.category    || ''
+    }, null, 2);
+
+    // --- Step 2 用: プロンプト ---
+    var wsPrompt = App.buildWsPrompt();
+
+    Swal.fire({
+      title: '<i class="bi bi-clipboard-plus me-2"></i>手動AI ワークシート作成',
+      html:
+        '<div class="accordion text-start" id="manual-ai-steps">'
+
+        // ── Step 1: 授業情報JSONコピー ──
+        + '<div class="accordion-item">'
+        + '  <h2 class="accordion-header">'
+        + '    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#mai-step1" aria-expanded="true">'
+        + '      <span class="badge bg-primary rounded-pill me-2">1</span>授業情報をコピーする'
+        + '    </button>'
+        + '  </h2>'
+        + '  <div id="mai-step1" class="accordion-collapse collapse show" data-bs-parent="#manual-ai-steps">'
+        + '    <div class="accordion-body">'
+        + '      <p class="small text-muted mb-2">以下のJSON（授業の基本情報）をコピーして、AIとの会話の冒頭に貼り付けてください。</p>'
+        + '      <textarea id="mai-taskinfo" class="form-control font-monospace mb-3" rows="8" readonly style="font-size:0.78rem; background:#f8f9fa;">'
+        +          taskInfoJson
+        + '      </textarea>'
+        + '      <button class="btn btn-outline-primary w-100" onclick="App._maiCopy(\'mai-taskinfo\', this)">'
+        + '        <i class="bi bi-clipboard me-2"></i>授業情報をコピー'
+        + '      </button>'
+        + '    </div>'
+        + '  </div>'
+        + '</div>'
+
+        // ── Step 2: プロンプトコピー ──
+        + '<div class="accordion-item">'
+        + '  <h2 class="accordion-header">'
+        + '    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mai-step2" aria-expanded="false">'
+        + '      <span class="badge bg-primary rounded-pill me-2">2</span>プロンプトをコピーしてAIに送信'
+        + '    </button>'
+        + '  </h2>'
+        + '  <div id="mai-step2" class="accordion-collapse collapse" data-bs-parent="#manual-ai-steps">'
+        + '    <div class="accordion-body">'
+        + '      <p class="small text-muted mb-2">以下のプロンプトをAIに送信してください。内容は自由に編集できます。</p>'
+        + '      <textarea id="mai-prompt" class="form-control font-monospace mb-3 border-primary" rows="14" style="font-size:0.78rem; white-space:pre-wrap;">'
+        +          wsPrompt.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        + '      </textarea>'
+        + '      <button class="btn btn-primary w-100 mb-3" onclick="App._maiCopy(\'mai-prompt\', this)">'
+        + '        <i class="bi bi-clipboard me-2"></i>プロンプトをコピー'
+        + '      </button>'
+        + '      <div class="row g-2">'
+        + '        <div class="col-6">'
+        + '          <a href="https://chat.openai.com/" target="_blank" class="btn btn-dark w-100 d-flex align-items-center justify-content-center">'
+        + '            <i class="bi bi-robot me-2"></i>ChatGPT</a>'
+        + '        </div>'
+        + '        <div class="col-6">'
+        + '          <a href="https://gemini.google.com/" target="_blank" class="btn btn-primary w-100 d-flex align-items-center justify-content-center" style="background-color:#4285f4; border-color:#4285f4;">'
+        + '            <i class="bi bi-stars me-2"></i>Gemini</a>'
+        + '        </div>'
+        + '      </div>'
+        + '    </div>'
+        + '  </div>'
+        + '</div>'
+
+        // ── Step 3: HTML貼り付け＆保存 ──
+        + '<div class="accordion-item">'
+        + '  <h2 class="accordion-header">'
+        + '    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mai-step3" aria-expanded="false">'
+        + '      <span class="badge bg-success rounded-pill me-2">3</span>AIの出力を貼り付けて保存'
+        + '    </button>'
+        + '  </h2>'
+        + '  <div id="mai-step3" class="accordion-collapse collapse" data-bs-parent="#manual-ai-steps">'
+        + '    <div class="accordion-body">'
+        + '      <p class="small text-muted mb-2">AIが出力したHTML（ワークシートの中身）をここに貼り付けてください。</p>'
+        + '      <textarea id="mai-html" class="form-control font-monospace mb-3" rows="12" placeholder="AIが生成したHTMLをここに貼り付け..." style="font-size:0.78rem;"></textarea>'
+        + '      <div class="d-grid">'
+        + '        <button class="btn btn-success btn-lg rounded-pill" onclick="App._maiSaveHtml()">'
+        + '          <i class="bi bi-check-circle me-2"></i>ワークシートを保存'
+        + '        </button>'
+        + '      </div>'
+        + '    </div>'
+        + '  </div>'
+        + '</div>'
+
+        + '</div>',
+      showConfirmButton: false,
+      showCloseButton: true,
+      width: '90%',
+      customClass: { popup: 'swal-wide' }
+    });
+  },
+
+  /**
+   * 手動AIモーダル内のテキストエリアをクリップボードにコピーする（内部ヘルパー）
+   * @param {string} textareaId - コピー対象のtextarea要素ID
+   * @param {HTMLButtonElement} btn - クリックされたボタン要素（フィードバック用）
+   */
+  _maiCopy: (textareaId, btn) => {
+    var el = document.getElementById(textareaId);
+    if (!el) return;
+
+    // textarea の内容をクリップボードにコピー
+    var text = el.value;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text);
+    } else {
+      el.select();
+      document.execCommand('copy');
+    }
+
+    // ボタンのフィードバック
+    if (btn) {
+      var orig = btn.innerHTML;
+      btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>コピーしました！';
+      btn.classList.add('btn-success');
+      btn.classList.remove('btn-primary', 'btn-outline-primary');
+      setTimeout(function() {
+        btn.innerHTML = orig;
+        btn.classList.remove('btn-success');
+        if (orig.indexOf('btn-primary') >= 0 || textareaId === 'mai-prompt') {
+          btn.classList.add('btn-primary');
+        } else {
+          btn.classList.add('btn-outline-primary');
+        }
+      }, 2000);
+    }
+  },
+
+  /**
+   * 手動AIモーダル Step 3: 貼り付けたHTMLをクリーン→保存→表示する
+   */
+  _maiSaveHtml: async () => {
+    var rawHtml = document.getElementById('mai-html').value;
+    if (!rawHtml || !rawHtml.trim()) {
+      return Swal.showValidationMessage('HTMLを貼り付けてください。');
+    }
+
+    // HTMLクリーニング（外部画像削除等）
+    var html = App.cleanAIOutput(rawHtml);
+
+    // 保存
+    var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
+    Swal.close();
+    UI.showLoading("保存しています...");
+    try {
+      await Server.call('saveWorksheetToDB', {
+        taskId:      State.currentTask.id,
+        unitName:    info.unitName || '',
+        stepTitle:   State.currentTask.title,
+        htmlContent: html,
+        jsonSource:  State.currentTask
+      });
+
+      // 画面を更新
+      App.selectTask(State.currentTask);
+      UI.toast('ワークシートを保存しました');
+    } catch (e) {
+      console.error(e);
+      Swal.fire('保存エラー', 'ワークシートの保存に失敗しました: ' + e.message, 'error');
+    } finally {
+      UI.hideLoading();
+    }
+  },
 
   /**
    * 選択中のタスクのワークシートをAIで生成する（単体生成）
@@ -585,89 +855,18 @@ Object.assign(App, {
 
     UI.showLoading("AIが執筆中です", "レイアウトを構成しています...");
     try {
-      // OCR テキストがあれば追加コンテキストとして挿入
-      var extraContext = "";
-      if (useOcr && State.ocrCache) {
-        extraContext = '\n【参考資料テキスト】\n' + State.ocrCache.substring(0, 1500)
-          + '...\n※この資料の内容を授業に反映させてください。';
-      }
-
-      var info        = State.unitData ? (State.unitData.unitInfo || {}) : { grade: "", unitName: "" };
-      var description = State.currentTask.description || "";
-
-      // --- AIプロンプトの構築（AIコーチング要素つき） ---
-      var prompt =
-        'あなたは日本の小学校教師です。以下の授業情報から、児童が自立的に取り組むためのワークシートHTMLを作成してください。\n\n'
-        + '【授業情報】\n'
-        + '学年: ' + (info.grade || '') + '\n'
-        + '単元名: ' + (info.unitName || '') + '\n'
-        + '授業タイトル: ' + State.currentTask.title + '\n'
-        + '活動内容: ' + description + '\n'
-        + extraContext + '\n\n'
-        + '【出力HTMLの構成（厳守）】\n'
-        + '以下の構造を使用し、AIコーチング要素（ヒント、めあて）を盛り込んでください。\n'
-        + 'Markdown記法は禁止です。\n\n'
-        + '【重要な制約】\n'
-        + '- 外部画像URL（img src="https://..."）は絶対に使用禁止です。via.placeholder.com 等の外部サービスも禁止です。\n'
-        + '- 図形・図表が必要な場合は、HTML/CSSのみで描画してください（div + border, SVGインライン, CSS shapes, tableなど）。\n'
-        + '- 例: 三角形 → <div style="width:0;height:0;border-left:40px solid transparent;border-right:40px solid transparent;border-bottom:60px solid #333;"></div>\n'
-        + '- 例: 円 → <div style="width:80px;height:80px;border-radius:50%;border:2px solid #333;"></div>\n'
-        + '- 例: 方眼・表 → <table> を使用\n\n'
-        // ヘッダー部分のテンプレート
-        + '<!-- 1. ヘッダー -->\n'
-        + '<div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px; font-family: \'Zen Maru Gothic\', sans-serif;">\n'
-        + '   <div><span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7em; margin-right:5px;">' + (info.grade || '') + '</span>'
-        + '<span style="font-weight:bold;">' + (info.unitName || '') + '</span></div>\n'
-        + '   <div style="text-align:right;">年 組 名前 __________________</div>\n'
-        + '</div>\n\n'
-        // タイトル & めあて
-        + '<!-- 2. タイトル & めあて -->\n'
-        + '<h1 style="text-align:center; font-size:1.8em; margin-bottom:20px;">' + State.currentTask.title + '</h1>\n'
-        + '<div style="background:#e3f2fd; padding:10px; border-radius:8px; margin-bottom:20px; border-left:5px solid #2196f3;">\n'
-        + '   <strong>今日のめあて:</strong> (活動内容から子供向けのめあてを生成)\n'
-        + '</div>\n\n'
-        // AIヒント
-        + '<!-- 3. AIヒント (Coaching) -->\n'
-        + '<div style="background:#fff3e0; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.9em; color:#e65100;">\n'
-        + '   <strong><i class="bi bi-lightbulb-fill"></i> AIコーチのヒント:</strong>\n'
-        + '   (この活動でつまずきやすい点や、考えるためのヒントを1-2行で記述)\n'
-        + '</div>\n\n'
-        // 本文エリア
-        + '<!-- 4. 本文エリア -->\n'
-        + '<!-- 児童が入力する記述欄には必ず class="ws-answer" を付けてください。 -->\n'
-        + '<!-- 問題文・指示文は通常のdiv/pで記述し、ws-answer は付けないでください。 -->\n'
-        + '<div style="min-height: 350px;">\n'
-        + '  (学習課題・問い・記述欄を生成。\n'
-        + '   問題文: 通常の div や p で記述\n'
-        + '   入力欄: <div class="ws-answer" style="border:1px solid #aaa; border-radius:6px; padding:10px; min-height:3em; margin:8px 0; background:#fffde7;"></div>\n'
-        + '   罫線付き入力欄: <div class="ws-answer ws-lines" style="min-height:4em; background-image:linear-gradient(#ccc 1px, transparent 1px); background-size:100% 1.5em; padding:4px 8px;"></div>\n'
-        + '   各設問ごとに ws-answer の入力欄を設けてください)\n'
-        + '</div>\n\n'
-        // フッター（ふりかえり＋自己評価ボタン）
-        + '<!-- 5. フッター -->\n'
-        + '<div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">\n'
-        + '  <div style="flex: 6;">\n'
-        + '    <div style="font-weight:bold; font-size:0.9em;">■ ふりかえり</div>\n'
-        + '    <div class="ws-answer ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em;"></div>\n'
-        + '  </div>\n'
-        + '  <div style="flex: 4;">\n'
-        + '    <div style="font-weight:bold; font-size:0.9em;">■ 自己評価</div>\n'
-        + '    <table class="table table-bordered table-sm mb-0" style="font-size: 0.85em; text-align:center;">\n'
-        + '      <tr><td class="bg-light" style="width:40%;">わかった</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
-        + '      <tr><td class="bg-light">考えた</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
-        + '      <tr><td class="bg-light">進んで</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
-        + '    </table>\n'
-        + '  </div>\n'
-        + '</div>';
+      // 共通のプロンプト構築処理を呼び出し
+      var prompt = App.buildWsPrompt();
 
       // --- AIに送信してHTML生成 ---
       var html = await Server.call('callGeminiAPI', prompt);
       html = App.cleanAIOutput(html);
 
       // --- 生成結果をサーバーに保存 ---
+      var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
       await Server.call('saveWorksheetToDB', {
         taskId:      State.currentTask.id,
-        unitName:    info.unitName,
+        unitName:    info.unitName || '',
         stepTitle:   State.currentTask.title,
         htmlContent: html,
         jsonSource:  State.currentTask
