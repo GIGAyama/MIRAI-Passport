@@ -254,6 +254,28 @@ function saveUserConfig(apiKey, teacherName, compassUrl) {
 }
 
 /**
+ * カスタム AI プロンプト（単元計画生成用）を保存する。
+ *
+ * @param {string} promptText - プロンプト文字列
+ * @return {boolean} 成功時 true
+ */
+function saveCustomAiPrompt(promptText) {
+  PropertiesService.getUserProperties().setProperty('CUSTOM_AI_PROMPT', promptText || '');
+  return true;
+}
+
+/**
+ * カスタム AI プロンプト（単元計画生成用）を取得する。
+ * 保存済みのものがなければ空文字を返す（フロント側でデフォルト値を使う）。
+ *
+ * @return {Object} { success: true, prompt: 保存済みプロンプト }
+ */
+function getCustomAiPrompt() {
+  var prompt = PropertiesService.getUserProperties().getProperty('CUSTOM_AI_PROMPT') || '';
+  return { success: true, prompt: prompt };
+}
+
+/**
  * ユーザー設定を読み込む。
  * UserProperties → ScriptProperties の順に探し、
  * 最初に見つかった値を返す（フォールバック機構）。
