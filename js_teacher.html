@@ -661,8 +661,8 @@ Object.assign(App, {
    * API キーがない環境でも外部 AI（ChatGPT / Gemini 等）を
    * 手動コピペで利用してワークシートを作成できるようにする。
    *
-   * Step 1: 授業情報JSONをコピー（AIへの入力素材）
-   * Step 2: ワークシート生成プロンプトをコピー（編集可）
+   * Step 1: ワークシート生成プロンプトをコピー（編集可）
+   * Step 2: 授業情報JSONをコピー（AIへの入力素材）
    * Step 3: AI出力HTMLを貼り付けて保存
    */
   openManualAiModal: () => {
@@ -689,34 +689,14 @@ Object.assign(App, {
       html:
         '<div class="accordion text-start" id="manual-ai-steps">'
 
-        // ── Step 1: 授業情報JSONコピー ──
+        // ── Step 1: プロンプトコピー ──
         + '<div class="accordion-item">'
         + '  <h2 class="accordion-header">'
         + '    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#mai-step1" aria-expanded="true">'
-        + '      <span class="badge bg-primary rounded-pill me-2">1</span>授業情報をコピーする'
+        + '      <span class="badge bg-primary rounded-pill me-2">1</span>プロンプトをコピーしてAIに送信'
         + '    </button>'
         + '  </h2>'
         + '  <div id="mai-step1" class="accordion-collapse collapse show" data-bs-parent="#manual-ai-steps">'
-        + '    <div class="accordion-body">'
-        + '      <p class="small text-muted mb-2">以下のJSON（授業の基本情報）をコピーして、AIとの会話の冒頭に貼り付けてください。</p>'
-        + '      <textarea id="mai-taskinfo" class="form-control font-monospace mb-3" rows="8" readonly style="font-size:0.78rem; background:#f8f9fa;">'
-        +          taskInfoJson
-        + '      </textarea>'
-        + '      <button class="btn btn-outline-primary w-100" onclick="App._maiCopy(\'mai-taskinfo\', this)">'
-        + '        <i class="bi bi-clipboard me-2"></i>授業情報をコピー'
-        + '      </button>'
-        + '    </div>'
-        + '  </div>'
-        + '</div>'
-
-        // ── Step 2: プロンプトコピー ──
-        + '<div class="accordion-item">'
-        + '  <h2 class="accordion-header">'
-        + '    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mai-step2" aria-expanded="false">'
-        + '      <span class="badge bg-primary rounded-pill me-2">2</span>プロンプトをコピーしてAIに送信'
-        + '    </button>'
-        + '  </h2>'
-        + '  <div id="mai-step2" class="accordion-collapse collapse" data-bs-parent="#manual-ai-steps">'
         + '    <div class="accordion-body">'
         + '      <p class="small text-muted mb-2">以下のプロンプトをAIに送信してください。内容は自由に編集できます。</p>'
         + '      <textarea id="mai-prompt" class="form-control font-monospace mb-3 border-primary" rows="14" style="font-size:0.78rem; white-space:pre-wrap;">'
@@ -735,6 +715,26 @@ Object.assign(App, {
         + '            <i class="bi bi-stars me-2"></i>Gemini</a>'
         + '        </div>'
         + '      </div>'
+        + '    </div>'
+        + '  </div>'
+        + '</div>'
+
+        // ── Step 2: 授業情報JSONコピー ──
+        + '<div class="accordion-item">'
+        + '  <h2 class="accordion-header">'
+        + '    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mai-step2" aria-expanded="false">'
+        + '      <span class="badge bg-primary rounded-pill me-2">2</span>授業情報をコピーする'
+        + '    </button>'
+        + '  </h2>'
+        + '  <div id="mai-step2" class="accordion-collapse collapse" data-bs-parent="#manual-ai-steps">'
+        + '    <div class="accordion-body">'
+        + '      <p class="small text-muted mb-2">以下のJSON（授業の基本情報）をコピーして、AIとの会話の冒頭に貼り付けてください。</p>'
+        + '      <textarea id="mai-taskinfo" class="form-control font-monospace mb-3" rows="8" readonly style="font-size:0.78rem; background:#f8f9fa;">'
+        +          taskInfoJson
+        + '      </textarea>'
+        + '      <button class="btn btn-outline-primary w-100" onclick="App._maiCopy(\'mai-taskinfo\', this)">'
+        + '        <i class="bi bi-clipboard me-2"></i>授業情報をコピー'
+        + '      </button>'
         + '    </div>'
         + '  </div>'
         + '</div>'
