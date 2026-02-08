@@ -1317,8 +1317,19 @@ Object.assign(App, {
 
   /**
    * ダッシュボードモードの起動処理
+   * セットアップ確認 → UI切替 → データ読み込みの順で実行する
    */
   initDashboardMode: async () => {
+    UI.showLoading("管理画面を起動しています", "データベースを確認中...");
+
+    // データベースのセットアップ確認（教師モードと同様）
+    var status = await Server.call('checkSetupStatus');
+    if (!status.isSetup) {
+      UI.hideLoading();
+      document.getElementById('setupWizard').classList.remove('d-none');
+      return;
+    }
+
     document.getElementById('setupWizard').classList.add('d-none');
     document.getElementById('appContainer').classList.remove('d-none');
 
@@ -1359,6 +1370,16 @@ Object.assign(App, {
       // --- フィルター適用 & 描画 ---
       App.dbApplyFilter();
 
+    } catch (e) {
+      console.error('Dashboard refresh error:', e);
+      // グリッドにエラーメッセージを表示
+      var grid = document.getElementById('dbGrid');
+      if (grid) {
+        grid.innerHTML = '<div class="text-center text-muted py-5">'
+          + '<i class="bi bi-exclamation-triangle fs-1"></i>'
+          + '<p class="mt-2">データの読み込みに失敗しました。<br>「更新」ボタンで再試行してください。</p>'
+          + '</div>';
+      }
     } finally {
       UI.hideLoading();
     }
@@ -1667,9 +1688,21 @@ Object.assign(App, {
   },
 
   /** 作成画面に切り替える */
-  dbGoTeacherMode: () => {
-    var url = window.location.pathname + '?mode=teacher';
-    window.location.href = url;
+  dbGoTeacherMode: async () => {
+    UI.showLoading("作成画面に移動中...", "");
+    var baseUrl = await Server.call('getWebAppUrl');
+    window.top.location.href = baseUrl + '?mode=teacher';
+  },
+
+  /**
+   * 教師モード → ダッシュボードモードへ遷移する
+   * GAS sandbox では window.location.pathname が正しいURLを返さないため、
+   * サーバーから getWebAppUrl で正規URLを取得して遷移する。
+   */
+  goToDashboard: async () => {
+    UI.showLoading("管理画面に移動中...", "");
+    var baseUrl = await Server.call('getWebAppUrl');
+    window.top.location.href = baseUrl + '?mode=dashboard';
   }
 });
 </script>
