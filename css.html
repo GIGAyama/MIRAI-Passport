@@ -629,7 +629,179 @@ td:has(.eval-btn.active) .eval-btn:not(.active) {
 
 
 /* ============================================================
- *  10. 児童モード専用スタイル & ユーティリティ
+ *  10. ダッシュボード（教師用管理画面）
+ *  ※ mode=dashboard でアクセスしたときのレイアウト
+ * ============================================================ */
+
+/* --- ダッシュボード: サイドバー・メインエリアを非表示 --- */
+body.dashboard-mode #sidebar,
+body.dashboard-mode #workspaceContainer { display: none !important; }
+
+body.dashboard-mode header.navbar {
+  background-color: #e3f2fd !important;
+  border-bottom: 1px solid #bbdefb;
+}
+body.dashboard-mode .navbar-brand { color: #1565c0 !important; }
+
+/* --- フィルターパネル（左） --- */
+.db-filter-panel {
+  width: 240px;
+  min-width: 240px;
+  background: #fff;
+  border-right: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.db-stats-card {
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+  border-bottom: 1px solid #e0e0e0;
+}
+
+/* --- メインエリア（中央カードグリッド） --- */
+.db-main-area {
+  flex: 1;
+  overflow-y: auto;
+  background: #f5f5f5;
+  transition: flex 0.2s ease;
+}
+.db-main-area.with-detail {
+  flex: 0.55;
+}
+
+/* --- カードグリッド --- */
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+.db-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+/* --- カード --- */
+.db-card {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.12s, box-shadow 0.12s;
+  border: 2px solid transparent;
+}
+.db-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.db-card.active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+}
+.db-card-thumb {
+  height: 120px;
+  background: #fafafa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.db-card-thumb img {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+.db-card-nothumb {
+  font-size: 2rem;
+  color: #ccc;
+}
+.db-card-body {
+  padding: 8px 10px;
+}
+.db-card-name {
+  font-weight: bold;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.db-card-meta .badge { font-size: 0.65rem; }
+.db-card-task {
+  font-size: 0.7rem;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- 詳細パネル（右） --- */
+.db-detail-panel {
+  width: 45%;
+  min-width: 360px;
+  background: #fff;
+  border-left: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+.db-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #eee;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+.db-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  background: #f9f9f9;
+}
+.db-detail-footer {
+  padding: 12px 14px;
+  border-top: 1px solid #eee;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+/* --- 詳細パネル内のプレビュー --- */
+.db-preview-sheet {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.db-preview-ws {
+  padding: 20px;
+  font-size: 9pt;
+  line-height: 1.5;
+  transform-origin: top left;
+}
+.db-preview-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+
+/* ============================================================
+ *  11. 児童モード専用スタイル & ユーティリティ
  * ============================================================ */
 
 /* --- ボタンの角を丸くする（全体共通） --- */
@@ -797,7 +969,8 @@ body.student-mode .ws-answer:empty::before {
 
   /* 不要なUI要素をすべて非表示 */
   #sidebar, #studentSidebar, header, #editorToolbar, footer,
-  #loadingOverlay, #contextMenu, .btn-float {
+  #loadingOverlay, #contextMenu, .btn-float,
+  .db-filter-panel, .db-detail-panel {
     display: none !important;
   }
 

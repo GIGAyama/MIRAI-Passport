@@ -76,8 +76,8 @@
   </script>
 </head>
 
-<!-- body に student-mode クラスを付与すると、CSS で児童向けスタイルが適用される -->
-<body class="<?= mode === 'student' ? 'student-mode' : '' ?>">
+<!-- body にモード別クラスを付与して、CSS でスタイルを切り替える -->
+<body class="<?= mode === 'student' ? 'student-mode' : (mode === 'dashboard' ? 'dashboard-mode' : '') ?>">
 
   <!-- ============================================================
        [2] ローディング画面
@@ -137,6 +137,7 @@
         <i class="bi bi-journal-richtext text-primary fs-3 me-2"></i>
         <span class="fw-bold text-primary">みらいパスポート</span>
         <? if (mode === 'student') { ?> <span class="badge bg-success ms-2">児童モード</span> <? } ?>
+        <? if (mode === 'dashboard') { ?> <span class="badge bg-info ms-2">管理画面</span> <? } ?>
       </a>
 
       <!-- 児童用：ワークシート一覧ボタン ＋ モード切替スイッチ -->
@@ -153,21 +154,22 @@
       <!-- 右側ボタン群 -->
       <div class="ms-auto d-flex gap-2 align-items-center">
 
-        <!-- ── 教師モードのボタン ── -->
+        <!-- ── 教師モード（作成画面）のボタン ── -->
         <? if (mode === 'teacher') { ?>
           <button class="btn btn-outline-danger btn-sm" onclick="Modals.openPdfImport()"><i class="bi bi-file-pdf"></i> 資料読込</button>
           <button class="btn btn-primary btn-sm rounded-pill" onclick="App.startBatchGeneration()"><i class="bi bi-lightning-fill"></i> 一括生成</button>
           <button class="btn btn-secondary btn-sm rounded-pill" onclick="App.startBatchPrint()"><i class="bi bi-printer-fill"></i> 一括印刷</button>
           <div class="vr mx-2"></div>
           <button class="btn btn-outline-secondary btn-sm" onclick="Modals.openImport()">計画</button>
+          <button class="btn btn-outline-info btn-sm rounded-pill" onclick="window.location.href=window.location.pathname+'?mode=dashboard'"><i class="bi bi-speedometer2 me-1"></i>管理</button>
           <button class="btn btn-light text-secondary" onclick="Modals.openSettings()"><i class="bi bi-gear-fill"></i></button>
 
+        <!-- ── ダッシュボード（管理画面）のボタン ── -->
+        <? } else if (mode === 'dashboard') { ?>
+          <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="App.dbRefresh()"><i class="bi bi-arrow-clockwise me-1"></i>更新</button>
+          <span id="dbSubmissionCount" class="text-muted small"></span>
+
         <!-- ── 児童モードのボタン ── -->
-        <!--
-          ステータス切替（👍🔥🆘）と提出ボタンは
-          renderStudentToolbar() でワークシート内に表示されるため、
-          ヘッダーには配置しない（重複防止）。
-        -->
         <? } else { ?>
           <!-- 広場への公開スイッチ -->
           <div class="form-check form-switch me-3" title="広場に公開するかどうか">
@@ -209,6 +211,97 @@
           <div class="tab-pane fade p-0" id="tab-history"><div id="historyList" class="list-group list-group-flush"></div></div>
         </div>
       </nav>
+      <? } ?>
+
+      <!-- ==========================================================
+           [4-2b] ダッシュボード（管理画面モード）
+           フィルター + 提出カードグリッド + 詳細プレビューの3カラム構成
+           ========================================================== -->
+      <? if (mode === 'dashboard') { ?>
+      <aside id="dbFilterPanel" class="db-filter-panel">
+        <!-- 統計サマリー -->
+        <div class="db-stats-card">
+          <div class="d-flex justify-content-between mb-2">
+            <span class="small fw-bold text-muted">提出状況</span>
+            <span id="dbStatsTotal" class="badge bg-secondary">0件</span>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <span id="dbStatsSubmitted" class="badge bg-success">提出 0</span>
+            <span id="dbStatsGraded" class="badge bg-primary">添削済 0</span>
+            <span id="dbStatsDraft" class="badge bg-warning text-dark">下書 0</span>
+          </div>
+        </div>
+
+        <!-- フィルター -->
+        <div class="p-3">
+          <label class="form-label small fw-bold mb-1">単元</label>
+          <select id="dbFilterUnit" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+            <option value="__all__">すべての単元</option>
+          </select>
+
+          <label class="form-label small fw-bold mb-1">授業</label>
+          <select id="dbFilterTask" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+            <option value="__all__">すべての授業</option>
+          </select>
+
+          <label class="form-label small fw-bold mb-1">ステータス</label>
+          <select id="dbFilterStatus" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+            <option value="__all__">すべて</option>
+            <option value="submitted">提出済のみ</option>
+            <option value="graded">添削済のみ</option>
+            <option value="draft">下書きのみ</option>
+            <option value="ungraded">未添削（提出済＋下書）</option>
+          </select>
+
+          <label class="form-label small fw-bold mb-1">並び順</label>
+          <select id="dbSortOrder" class="form-select form-select-sm" onchange="App.dbApplyFilter()">
+            <option value="newest">新しい順</option>
+            <option value="oldest">古い順</option>
+            <option value="name">名前順</option>
+            <option value="status">ステータス順</option>
+          </select>
+        </div>
+
+        <!-- 作成画面へのリンク -->
+        <div class="mt-auto p-3 border-top">
+          <a id="dbLinkToTeacher" href="#" class="btn btn-outline-secondary btn-sm w-100" onclick="App.dbGoTeacherMode()">
+            <i class="bi bi-pencil-square me-1"></i>作成画面に切替
+          </a>
+        </div>
+      </aside>
+
+      <!-- カードグリッド -->
+      <div id="dbMainArea" class="db-main-area">
+        <div id="dbGrid" class="db-grid"></div>
+      </div>
+
+      <!-- 詳細プレビュー（右パネル・カードクリックで表示） -->
+      <aside id="dbDetailPanel" class="db-detail-panel d-none">
+        <div class="db-detail-header">
+          <div class="d-flex align-items-center">
+            <button class="btn btn-sm btn-light me-2" onclick="App.dbCloseDetail()"><i class="bi bi-x-lg"></i></button>
+            <h6 id="dbDetailName" class="mb-0 fw-bold text-truncate"></h6>
+          </div>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-secondary" onclick="App.dbPrevSubmission()" title="前へ"><i class="bi bi-chevron-left"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="App.dbNextSubmission()" title="次へ"><i class="bi bi-chevron-right"></i></button>
+          </div>
+        </div>
+        <div id="dbDetailBody" class="db-detail-body">
+          <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+        </div>
+        <div class="db-detail-footer">
+          <div class="d-flex gap-2 mb-2">
+            <span id="dbDetailStatus" class="badge"></span>
+            <span id="dbDetailEval" class="small text-muted"></span>
+            <span id="dbDetailTime" class="small text-muted ms-auto"></span>
+          </div>
+          <div class="input-group">
+            <input type="text" id="dbFeedbackInput" class="form-control" placeholder="コメントを入力...">
+            <button class="btn btn-primary" onclick="App.dbSaveFeedback()"><i class="bi bi-send-fill me-1"></i>返却</button>
+          </div>
+        </div>
+      </aside>
       <? } ?>
 
       <!-- ==========================================================

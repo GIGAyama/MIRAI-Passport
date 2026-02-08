@@ -604,6 +604,83 @@ function getTaskSubmissions(taskId) {
 }
 
 /**
+ * 教師用管理画面: 全提出データとワークシート一覧を一括取得する。
+ * クライアント側でフィルタリングするため、1回の通信で全データを返す。
+ * canvasJson は重いので除外し、canvasImage（サムネイル）のみ返す。
+ *
+ * → 読み込み元: Responses シート + Worksheets シート
+ *
+ * @return {Object} { submissions: [...], worksheets: [...] }
+ */
+function getDashboardData() {
+  var ss = getDbSpreadsheet();
+
+  // --- ワークシート一覧（軽量: ID + 単元名 + タイトルのみ） ---
+  var wsSheet = ss.getSheetByName('Worksheets');
+  var worksheets = [];
+  if (wsSheet.getLastRow() >= 2) {
+    var wsData = wsSheet.getRange(2, 1, wsSheet.getLastRow() - 1, 3).getValues();
+    worksheets = wsData
+      .filter(function(r) { return r[0]; })
+      .map(function(r) {
+        return { taskId: String(r[0]), unitName: String(r[1]), stepTitle: String(r[2]) };
+      });
+  }
+
+  // --- 全提出データ（canvasJson を除外して軽量化） ---
+  var resSheet = ss.getSheetByName('Responses');
+  var submissions = [];
+  if (resSheet.getLastRow() >= 2) {
+    var resData = resSheet.getDataRange().getValues();
+    for (var i = 1; i < resData.length; i++) {
+      var row = resData[i];
+      if (!row[0]) continue;  // responseId が空なら skip
+      submissions.push({
+        rowIndex:     i + 1,
+        responseId:   row[0],
+        taskId:       String(row[1]),
+        studentId:    row[2],
+        studentName:  row[3],
+        submittedAt:  row[4] ? new Date(row[4]).getTime() : 0,
+        canvasImage:  row[5],
+        textContent:  row[6],
+        status:       row[7],
+        feedbackText: row[8]
+      });
+    }
+  }
+
+  return { submissions: submissions, worksheets: worksheets };
+}
+
+/**
+ * 教師用管理画面: 指定行の提出データからcanvasJsonを取得する。
+ * 添削プレビュー時にのみ呼び出す（一覧では不要なため分離）。
+ *
+ * @param {number} rowIndex - Responsesシートの行番号
+ * @return {Object|null} { canvasJson, htmlContent }
+ */
+function getSubmissionDetail(rowIndex) {
+  var ss = getDbSpreadsheet();
+  var resSheet = ss.getSheetByName('Responses');
+  var row = resSheet.getRange(rowIndex, 1, 1, RS_TOTAL_COLS).getValues()[0];
+  var taskId = String(row[1]);
+
+  // 対応するワークシートのHTMLも取得
+  var wsSheet = ss.getSheetByName('Worksheets');
+  var htmlContent = '';
+  var found = wsSheet.getRange("A:A").createTextFinder(taskId).matchEntireCell(true).findNext();
+  if (found) {
+    htmlContent = wsSheet.getRange(found.getRow(), WS_COL_HTML_CONTENT).getValue();
+  }
+
+  return {
+    canvasJson:  safeJSONParse(row[11]),
+    htmlContent: htmlContent
+  };
+}
+
+/**
  * 教師が児童の回答に対するフィードバック（添削）を保存する。
  *
  * → 書き込み先: Responses シートの H列（status）、I列（feedbackText）、L列（canvasJson）

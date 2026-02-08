@@ -1294,6 +1294,382 @@ Object.assign(App, {
    */
   processOcrImport: async () => {
     /* OCR placeholder — 将来実装予定 */
+  },
+
+
+  /* ==========================================================
+   *  2-10. 教師用管理画面（ダッシュボードモード）
+   * ==========================================================
+   *
+   * mode=dashboard でアクセスすると起動する専用画面。
+   * 全ワークシートの提出状況を一覧し、爆速で確認・添削できる。
+   *
+   * ■ データフロー
+   *   1. initDashboardMode → getDashboardData で全データ一括取得
+   *   2. クライアント側で State._db にキャッシュ
+   *   3. フィルター変更時はサーバー通信なしで即座に再描画
+   *   4. 詳細表示時のみ getSubmissionDetail で canvasJson を取得
+   *
+   * ■ キーボードナビゲーション
+   *   ←→: 前後の提出に移動
+   *   Esc: 詳細パネルを閉じる
+   */
+
+  /**
+   * ダッシュボードモードの起動処理
+   */
+  initDashboardMode: async () => {
+    document.getElementById('setupWizard').classList.add('d-none');
+    document.getElementById('appContainer').classList.remove('d-none');
+
+    // ワークシート作成用UIを非表示
+    var ws = document.getElementById('workspaceContainer');
+    if (ws) ws.classList.add('d-none');
+
+    // キーボードナビゲーション
+    document.addEventListener('keydown', function(e) {
+      if (State.mode !== 'dashboard') return;
+      if (e.key === 'ArrowLeft')  App.dbPrevSubmission();
+      if (e.key === 'ArrowRight') App.dbNextSubmission();
+      if (e.key === 'Escape')     App.dbCloseDetail();
+    });
+
+    await App.dbRefresh();
+  },
+
+  /**
+   * データを取得してダッシュボードを描画する
+   */
+  dbRefresh: async () => {
+    UI.showLoading("データを読み込み中...", "提出状況を集計しています");
+    try {
+      var data = await Server.call('getDashboardData');
+
+      // --- キャッシュに保存 ---
+      State._db = {
+        allSubmissions: data.submissions || [],
+        worksheets:     data.worksheets  || [],
+        filtered:       [],
+        detailIndex:    -1
+      };
+
+      // --- フィルタードロップダウンを構築 ---
+      App._dbBuildFilters();
+
+      // --- フィルター適用 & 描画 ---
+      App.dbApplyFilter();
+
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+  /**
+   * フィルタードロップダウンの選択肢を構築する（内部処理）
+   */
+  _dbBuildFilters: () => {
+    var db = State._db;
+
+    // 単元フィルター
+    var unitEl = document.getElementById('dbFilterUnit');
+    if (unitEl) {
+      var units = [];
+      db.worksheets.forEach(function(ws) {
+        if (ws.unitName && units.indexOf(ws.unitName) === -1) units.push(ws.unitName);
+      });
+      unitEl.innerHTML = '<option value="__all__">すべての単元</option>';
+      units.forEach(function(u) {
+        unitEl.innerHTML += '<option value="' + u + '">' + u + '</option>';
+      });
+    }
+
+    // 授業フィルター（単元の選択に連動して更新）
+    App._dbUpdateTaskFilter();
+  },
+
+  /**
+   * 授業フィルターを単元選択に連動して更新する（内部処理）
+   */
+  _dbUpdateTaskFilter: () => {
+    var db = State._db;
+    var unitFilter = document.getElementById('dbFilterUnit').value;
+    var taskEl = document.getElementById('dbFilterTask');
+    if (!taskEl) return;
+
+    var tasks = db.worksheets;
+    if (unitFilter !== '__all__') {
+      tasks = tasks.filter(function(ws) { return ws.unitName === unitFilter; });
+    }
+
+    taskEl.innerHTML = '<option value="__all__">すべての授業</option>';
+    tasks.forEach(function(ws) {
+      taskEl.innerHTML += '<option value="' + ws.taskId + '">' + (ws.stepTitle || ws.taskId) + '</option>';
+    });
+  },
+
+  /**
+   * フィルターを適用してカードグリッドを再描画する
+   */
+  dbApplyFilter: () => {
+    var db = State._db;
+    if (!db) return;
+
+    // 授業フィルターを単元に連動更新
+    App._dbUpdateTaskFilter();
+
+    // --- フィルター値の取得 ---
+    var unitFilter   = document.getElementById('dbFilterUnit').value;
+    var taskFilter   = document.getElementById('dbFilterTask').value;
+    var statusFilter = document.getElementById('dbFilterStatus').value;
+    var sortOrder    = document.getElementById('dbSortOrder').value;
+
+    // --- フィルタリング ---
+    var result = db.allSubmissions.slice();
+
+    // 単元フィルター: taskId → worksheets のマッピングが必要
+    if (unitFilter !== '__all__') {
+      var unitTaskIds = db.worksheets
+        .filter(function(ws) { return ws.unitName === unitFilter; })
+        .map(function(ws) { return ws.taskId; });
+      result = result.filter(function(s) { return unitTaskIds.indexOf(s.taskId) !== -1; });
+    }
+
+    if (taskFilter !== '__all__') {
+      result = result.filter(function(s) { return s.taskId === taskFilter; });
+    }
+
+    if (statusFilter !== '__all__') {
+      if (statusFilter === 'ungraded') {
+        result = result.filter(function(s) { return s.status !== 'graded'; });
+      } else {
+        result = result.filter(function(s) { return s.status === statusFilter; });
+      }
+    }
+
+    // --- ソート ---
+    result.sort(function(a, b) {
+      switch (sortOrder) {
+        case 'oldest': return a.submittedAt - b.submittedAt;
+        case 'name':   return (a.studentName || '').localeCompare(b.studentName || '');
+        case 'status':
+          var order = { submitted: 0, draft: 1, graded: 2 };
+          return (order[a.status] || 9) - (order[b.status] || 9);
+        default:       return b.submittedAt - a.submittedAt;
+      }
+    });
+
+    db.filtered = result;
+
+    // --- 統計更新 ---
+    App._dbUpdateStats(result);
+
+    // --- カードグリッド描画 ---
+    App._dbRenderGrid(result);
+  },
+
+  /**
+   * 統計バッジを更新する（内部処理）
+   */
+  _dbUpdateStats: (list) => {
+    var total     = list.length;
+    var submitted = list.filter(function(s) { return s.status === 'submitted'; }).length;
+    var graded    = list.filter(function(s) { return s.status === 'graded'; }).length;
+    var draft     = list.filter(function(s) { return s.status === 'draft'; }).length;
+
+    var el;
+    el = document.getElementById('dbStatsTotal');     if (el) el.textContent = total + '件';
+    el = document.getElementById('dbStatsSubmitted');  if (el) el.textContent = '提出 ' + submitted;
+    el = document.getElementById('dbStatsGraded');     if (el) el.textContent = '添削済 ' + graded;
+    el = document.getElementById('dbStatsDraft');      if (el) el.textContent = '下書 ' + draft;
+    el = document.getElementById('dbSubmissionCount'); if (el) el.textContent = '全' + State._db.allSubmissions.length + '件';
+  },
+
+  /**
+   * カードグリッドを描画する（内部処理）
+   */
+  _dbRenderGrid: (list) => {
+    var grid = document.getElementById('dbGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    if (list.length === 0) {
+      grid.innerHTML = '<div class="db-empty"><i class="bi bi-inbox fs-1 d-block mb-2"></i>提出データがありません</div>';
+      return;
+    }
+
+    // worksheet の taskId → stepTitle マッピング
+    var wsMap = {};
+    if (State._db && State._db.worksheets) {
+      State._db.worksheets.forEach(function(ws) { wsMap[ws.taskId] = ws.stepTitle; });
+    }
+
+    list.forEach(function(s, idx) {
+      var card = document.createElement('div');
+      card.className = 'db-card' + (State._db.detailIndex === idx ? ' active' : '');
+      card.onclick = function() { App.dbOpenDetail(idx); };
+
+      // ステータスバッジ
+      var badge;
+      if (s.status === 'graded')    badge = '<span class="badge bg-primary">添削済</span>';
+      else if (s.status === 'submitted') badge = '<span class="badge bg-success">提出済</span>';
+      else                          badge = '<span class="badge bg-warning text-dark">下書き</span>';
+
+      // サムネイル
+      var thumb = s.canvasImage
+        ? '<img src="' + s.canvasImage + '" loading="lazy">'
+        : '<div class="db-card-nothumb"><i class="bi bi-file-earmark-text"></i></div>';
+
+      // 授業名
+      var taskLabel = wsMap[s.taskId] || s.taskId;
+
+      card.innerHTML =
+        '<div class="db-card-thumb">' + thumb + '</div>'
+        + '<div class="db-card-body">'
+        + '  <div class="db-card-name">' + (s.studentName || '名無し') + '</div>'
+        + '  <div class="db-card-meta">'
+        + '    ' + badge
+        + '    <span class="db-card-task">' + taskLabel + '</span>'
+        + '  </div>'
+        + '</div>';
+
+      grid.appendChild(card);
+    });
+  },
+
+  /**
+   * カードクリック → 詳細プレビューを開く
+   *
+   * @param {number} idx - State._db.filtered 内のインデックス
+   */
+  dbOpenDetail: async (idx) => {
+    var db = State._db;
+    if (!db || !db.filtered[idx]) return;
+
+    db.detailIndex = idx;
+    var s = db.filtered[idx];
+
+    // グリッドのアクティブ表示を更新
+    document.querySelectorAll('.db-card').forEach(function(c, i) {
+      c.classList.toggle('active', i === idx);
+    });
+
+    // 詳細パネルを表示
+    var panel = document.getElementById('dbDetailPanel');
+    panel.classList.remove('d-none');
+
+    // メインエリアを狭める
+    var main = document.getElementById('dbMainArea');
+    if (main) main.classList.add('with-detail');
+
+    // ヘッダー情報
+    document.getElementById('dbDetailName').textContent = (s.studentName || '名無し') + ' さんの回答';
+
+    // ステータス
+    var statusEl = document.getElementById('dbDetailStatus');
+    if (s.status === 'graded')    { statusEl.className = 'badge bg-primary'; statusEl.textContent = '添削済'; }
+    else if (s.status === 'submitted') { statusEl.className = 'badge bg-success'; statusEl.textContent = '提出済'; }
+    else                          { statusEl.className = 'badge bg-warning text-dark'; statusEl.textContent = '下書き'; }
+
+    // 評価テキスト
+    var evalEl = document.getElementById('dbDetailEval');
+    if (evalEl) evalEl.textContent = s.textContent || '';
+
+    // 日時
+    var timeEl = document.getElementById('dbDetailTime');
+    if (timeEl && s.submittedAt) timeEl.textContent = new Date(s.submittedAt).toLocaleString();
+
+    // コメント
+    document.getElementById('dbFeedbackInput').value = s.feedbackText || '';
+
+    // 本文をロード（詳細表示時のみサーバー通信）
+    var body = document.getElementById('dbDetailBody');
+    body.innerHTML = '<div class="text-center py-5"><div class="spinner-border spinner-border-sm text-primary"></div></div>';
+
+    try {
+      var detail = await Server.call('getSubmissionDetail', s.rowIndex);
+      var html = '<div class="db-preview-sheet">'
+        + '<div class="db-preview-ws">' + (detail.htmlContent || '<p class="text-muted">ワークシートデータなし</p>') + '</div>';
+
+      // 児童の手書きデータがあればキャンバス画像で重ねる
+      if (s.canvasImage) {
+        html += '<img src="' + s.canvasImage + '" class="db-preview-overlay">';
+      }
+      html += '</div>';
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="text-center py-5 text-danger">読み込みに失敗しました</div>';
+    }
+  },
+
+  /** 詳細パネルを閉じる */
+  dbCloseDetail: () => {
+    var panel = document.getElementById('dbDetailPanel');
+    if (panel) panel.classList.add('d-none');
+
+    var main = document.getElementById('dbMainArea');
+    if (main) main.classList.remove('with-detail');
+
+    if (State._db) State._db.detailIndex = -1;
+
+    document.querySelectorAll('.db-card.active').forEach(function(c) { c.classList.remove('active'); });
+  },
+
+  /** 前の提出に移動 */
+  dbPrevSubmission: () => {
+    if (!State._db || State._db.detailIndex <= 0) return;
+    App.dbOpenDetail(State._db.detailIndex - 1);
+  },
+
+  /** 次の提出に移動 */
+  dbNextSubmission: () => {
+    if (!State._db || State._db.detailIndex >= State._db.filtered.length - 1) return;
+    App.dbOpenDetail(State._db.detailIndex + 1);
+  },
+
+  /**
+   * 詳細パネルからフィードバックを保存して返却する
+   */
+  dbSaveFeedback: async () => {
+    var db = State._db;
+    if (!db || db.detailIndex < 0) return;
+
+    var s = db.filtered[db.detailIndex];
+    var feedbackText = document.getElementById('dbFeedbackInput').value;
+
+    try {
+      await Server.call('saveFeedback', {
+        rowIndex:     s.rowIndex,
+        feedbackText: feedbackText
+      });
+
+      // キャッシュのステータスを更新
+      s.status = 'graded';
+      s.feedbackText = feedbackText;
+
+      // 表示を更新
+      var statusEl = document.getElementById('dbDetailStatus');
+      statusEl.className = 'badge bg-primary';
+      statusEl.textContent = '添削済';
+
+      App._dbUpdateStats(db.filtered);
+      App._dbRenderGrid(db.filtered);
+
+      UI.toast('返却しました');
+
+      // 自動で次に進む
+      if (db.detailIndex < db.filtered.length - 1) {
+        setTimeout(function() { App.dbNextSubmission(); }, 500);
+      }
+    } catch (e) {
+      console.error(e);
+      Swal.fire('エラー', '保存に失敗しました', 'error');
+    }
+  },
+
+  /** 作成画面に切り替える */
+  dbGoTeacherMode: () => {
+    var url = window.location.pathname + '?mode=teacher';
+    window.location.href = url;
   }
 });
 </script>

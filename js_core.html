@@ -317,6 +317,9 @@ const App = {
     if (State.mode === 'student') {
       // 児童モードの初期化（js_student.html で定義）
       await App.initStudentMode(taskId, studentId, studentName);
+    } else if (State.mode === 'dashboard') {
+      // 管理画面モードの初期化（js_teacher.html で定義）
+      await App.initDashboardMode();
     } else {
       // 先生モードの初期化（js_teacher.html で定義）
       await App.initTeacherMode(importId);
