@@ -448,6 +448,44 @@ footer {
 .ws-reflection-box    { border: 1px solid var(--ws-border-strong); border-radius: 4px; padding: 5px; }
 .ws-reflection-title  { font-weight: bold; font-size: 0.8rem; display: block; margin-bottom: 2px; background: #eee; padding: 1px 4px; }
 
+/* --- 自己評価ボタン（△ ◯ ◎） --- */
+/* span / button どちらでも動作するよう要素を限定しない */
+.eval-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2em;
+  height: 2.2em;
+  margin: 2px;
+  border: 2px solid #ccc;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 1em;
+  font-weight: bold;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  line-height: 1;
+}
+.eval-btn:hover {
+  border-color: #888;
+  background: #f5f5f5;
+  transform: scale(1.1);
+}
+/* 選択済み状態 */
+.eval-btn.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+  transform: scale(1.15);
+  box-shadow: 0 2px 6px rgba(26, 115, 232, 0.3);
+}
+/* 同じ行で他のボタンが選択済みなら、未選択ボタンを薄くする */
+td:has(.eval-btn.active) .eval-btn:not(.active) {
+  opacity: 0.4;
+}
+
 /* --- ルーブリック（評価基準表） --- */
 .ws-rubric-table      { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
 .ws-rubric-table th,

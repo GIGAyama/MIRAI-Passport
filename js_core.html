@@ -181,7 +181,8 @@ const Printer = {
       + '  .ws-box, .ws-lines, table, tr, .ws-header, h1 { break-inside: avoid; }'
       + '  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
       + '  .eval-btn:not(.active) { opacity: 0.1; border-color: #eee; }'
-      + '  .btn, button, .no-print { display: none !important; }'
+      + '  .eval-btn.active { background: #333 !important; color: #fff !important; border-color: #333 !important; }'
+      + '  .btn, button:not(.eval-btn), .no-print { display: none !important; }'
       + '}'
       + '.print-sheet { border-bottom: 1px dashed #ccc; margin-bottom: 20px; }'
       + '</style>';

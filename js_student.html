@@ -134,7 +134,8 @@ Object.assign(App, {
         var label = r.querySelector('td:first-child');
         var activeBtn = r.querySelector('.eval-btn.active');
         if (label && activeBtn) {
-          evalText += '[' + label.innerText + ': ' + activeBtn.innerText + '] ';
+          var val = activeBtn.getAttribute('data-value') || activeBtn.innerText;
+          evalText += '[' + label.innerText + ': ' + val.trim() + '] ';
         }
       });
 

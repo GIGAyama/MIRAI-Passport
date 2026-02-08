@@ -382,8 +382,8 @@ Object.assign(App, {
         + '   罫線付き入力欄: <div class="ws-answer ws-lines" style="min-height:4em; background-image:linear-gradient(#ccc 1px, transparent 1px); background-size:100% 1.5em; padding:4px 8px;"></div>\n'
         + '   各設問ごとに ws-answer の入力欄を設けてください)\n'
         + '</div>\n\n'
-        // フッター（自己評価）
-        + '<!-- 5. フッター (スタンプ) -->\n'
+        // フッター（ふりかえり＋自己評価ボタン）
+        + '<!-- 5. フッター -->\n'
         + '<div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">\n'
         + '  <div style="flex: 6;">\n'
         + '    <div style="font-weight:bold; font-size:0.9em;">■ ふりかえり</div>\n'
@@ -391,10 +391,10 @@ Object.assign(App, {
         + '  </div>\n'
         + '  <div style="flex: 4;">\n'
         + '    <div style="font-weight:bold; font-size:0.9em;">■ 自己評価</div>\n'
-        + '    <table class="table table-bordered table-sm mb-0" style="font-size: 0.75em; text-align:center;">\n'
-        + '      <tr><td class="bg-light">わかった</td><td><span class="eval-btn">◎</span><span class="eval-btn">◯</span><span class="eval-btn">△</span></td></tr>\n'
-        + '      <tr><td class="bg-light">考えた</td><td><span class="eval-btn">◎</span><span class="eval-btn">◯</span><span class="eval-btn">△</span></td></tr>\n'
-        + '      <tr><td class="bg-light">進んで</td><td><span class="eval-btn">◎</span><span class="eval-btn">◯</span><span class="eval-btn">△</span></td></tr>\n'
+        + '    <table class="table table-bordered table-sm mb-0" style="font-size: 0.85em; text-align:center;">\n'
+        + '      <tr><td class="bg-light" style="width:40%;">わかった</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+        + '      <tr><td class="bg-light">考えた</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+        + '      <tr><td class="bg-light">進んで</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
         + '    </table>\n'
         + '  </div>\n'
         + '</div>';
