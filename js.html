@@ -227,6 +227,72 @@ const Modals = {
     } finally {
       UI.hideLoading();
     }
+  },
+
+  openAnalytics: async () => {
+    if (!State.currentTask) return Swal.fire('エラー', '授業を選択してください', 'warning');
+
+    UI.showLoading("分析データを取得中...");
+    try {
+      const data = await Server.call('getClassAnalytics', State.currentTask.id);
+      const container = document.getElementById('analyticsContent');
+
+      if (data.total === 0) {
+        container.innerHTML = '<div class="text-center py-5 text-muted"><i class="bi bi-inbox" style="font-size:3rem;"></i><p class="mt-3">まだ提出データがありません</p></div>';
+      } else {
+        const submittedPct = Math.round((data.submitted / data.total) * 100);
+        const gradedPct = Math.round((data.graded / data.total) * 100);
+        const draftPct = Math.round((data.draft / data.total) * 100);
+
+        container.innerHTML = `
+          <div class="row g-3 mb-4">
+            <div class="col-3"><div class="card text-center border-0 shadow-sm"><div class="card-body"><div class="fs-2 fw-bold text-primary">${data.total}</div><small class="text-muted">合計</small></div></div></div>
+            <div class="col-3"><div class="card text-center border-0 shadow-sm"><div class="card-body"><div class="fs-2 fw-bold text-success">${data.submitted}</div><small class="text-muted">提出済</small></div></div></div>
+            <div class="col-3"><div class="card text-center border-0 shadow-sm"><div class="card-body"><div class="fs-2 fw-bold text-info">${data.graded}</div><small class="text-muted">添削済</small></div></div></div>
+            <div class="col-3"><div class="card text-center border-0 shadow-sm"><div class="card-body"><div class="fs-2 fw-bold text-warning">${data.draft}</div><small class="text-muted">下書き</small></div></div></div>
+          </div>
+
+          <div class="card border-0 shadow-sm mb-4"><div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart-fill text-primary"></i> 提出率</h6>
+            <div class="progress" style="height: 24px;">
+              <div class="progress-bar bg-info" style="width: ${gradedPct}%">${data.graded > 0 ? gradedPct + '%' : ''}</div>
+              <div class="progress-bar bg-success" style="width: ${submittedPct}%">${data.submitted > 0 ? submittedPct + '%' : ''}</div>
+              <div class="progress-bar bg-warning" style="width: ${draftPct}%">${data.draft > 0 ? draftPct + '%' : ''}</div>
+            </div>
+            <div class="d-flex gap-3 mt-2 small text-muted">
+              <span><span class="badge bg-info">&nbsp;</span> 添削済</span>
+              <span><span class="badge bg-success">&nbsp;</span> 提出済</span>
+              <span><span class="badge bg-warning">&nbsp;</span> 下書き</span>
+            </div>
+          </div></div>
+
+          <div class="card border-0 shadow-sm mb-4"><div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-emoji-smile text-warning"></i> 自己評価の集計</h6>
+            ${App.renderEvalChart(data.evalCounts, data.total)}
+          </div></div>
+
+          <div class="card border-0 shadow-sm"><div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-people-fill text-primary"></i> 児童一覧</h6>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover mb-0">
+                <thead><tr><th>名前</th><th>ステータス</th><th>提出時刻</th><th>添削</th></tr></thead>
+                <tbody>
+                  ${data.students.map(s => '<tr>'
+                    + '<td class="fw-bold">' + s.studentName + '</td>'
+                    + '<td>' + (s.status === 'graded' ? '<span class="badge bg-info">添削済</span>' : s.status === 'submitted' ? '<span class="badge bg-success">提出済</span>' : '<span class="badge bg-warning">下書き</span>') + '</td>'
+                    + '<td class="text-muted small">' + (s.submittedAt ? new Date(s.submittedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-') + '</td>'
+                    + '<td>' + (s.hasFeedback ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-dash text-muted"></i>') + '</td>'
+                    + '</tr>').join('')}
+                </tbody>
+              </table>
+            </div>
+          </div></div>
+        `;
+      }
+      new bootstrap.Modal(document.getElementById('analyticsModal')).show();
+    } finally {
+      UI.hideLoading();
+    }
   }
 };
 
@@ -800,15 +866,26 @@ const App = {
 
       let html = await Server.call('callGeminiAPI', prompt);
       html = App.cleanAIOutput(html);
-      
+
+      // ルーブリックも同時生成
+      UI.showLoading("AIが執筆中です", "評価基準を作成しています...");
+      let rubricHtml = await Server.call('generateRubricAI', {
+        unitName: info.unitName,
+        stepTitle: State.currentTask.title,
+        description: description
+      });
+      rubricHtml = App.cleanAIOutput(rubricHtml);
+      State.currentTask.rubricHtml = rubricHtml;
+
       await Server.call('saveWorksheetToDB', {
         taskId: State.currentTask.id,
         unitName: info.unitName,
         stepTitle: State.currentTask.title,
         htmlContent: html,
-        jsonSource: State.currentTask
+        jsonSource: State.currentTask,
+        rubricHtml: rubricHtml
       });
-      
+
       App.selectTask(State.currentTask);
       
     } catch (e) {
@@ -867,21 +944,22 @@ const App = {
         UI.updateBatchProgress(Math.round(((i) / queue.length) * 100), `${i + 1} / ${queue.length}: ${task.title}`);
         
         try {
-          // Server-side generation function (Phase 4 Enhanced)
-          const html = await Server.call('generateSingleWorksheet', {
+          // ワークシート+ルーブリック同時生成
+          const result = await Server.call('generateWorksheetWithRubric', {
             unitName: task.unitName || State.unitData?.unitInfo?.unitName || "単元",
             stepTitle: task.title,
             description: task.description
           });
-          
+
           const jsonSrc = task.jsonSource || { id: task.id, title: task.title, description: task.description };
 
           await Server.call('saveWorksheetToDB', {
             taskId: task.id,
             unitName: task.unitName || State.unitData?.unitInfo?.unitName,
             stepTitle: task.title,
-            htmlContent: html,
-            jsonSource: jsonSrc
+            htmlContent: result.htmlContent,
+            jsonSource: jsonSrc,
+            rubricHtml: result.rubricHtml
           });
         } catch (e) {
           console.error(`Task ${task.title} failed:`, e);
@@ -1210,6 +1288,115 @@ const App = {
     }
   },
 
+  // --- AI Grading ---
+
+  generateAIFeedback: async () => {
+    if (!State.gradingRow) return;
+    UI.showLoading("AI添削を生成中...", "ルーブリックに基づいて評価しています");
+    try {
+      const currentSub = State.dashboardData.find(s => s.rowIndex === State.gradingRow);
+      const result = await Server.call('generateFeedbackAI', {
+        worksheetTitle: State.currentTask?.title || "",
+        rubricHtml: State.currentTask?.rubricHtml || "",
+        selfEvaluation: currentSub?.textContent || "",
+        studentName: currentSub?.studentName || ""
+      });
+      document.getElementById('feedbackTextInput').value = result;
+      const hint = document.getElementById('feedbackAIHint');
+      if (hint) hint.classList.remove('d-none');
+      UI.toast("AI添削を生成しました", "info");
+    } catch(e) {
+      console.error(e);
+      Swal.fire('エラー', 'AI添削の生成に失敗しました', 'error');
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+  batchAIGrading: async () => {
+    if (!State.dashboardData || State.dashboardData.length === 0) return;
+
+    const ungraded = State.dashboardData.filter(s => s.status !== 'graded');
+    if (ungraded.length === 0) return Swal.fire('すべて添削済みです', '', 'info');
+
+    const confirm = await Swal.fire({
+      title: 'AI一括添削',
+      text: `${ungraded.length}件の未添削回答にAIフィードバックを生成しますか？`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: '開始',
+      cancelButtonText: 'キャンセル'
+    });
+    if (!confirm.isConfirmed) return;
+
+    UI.showLoading("AI一括添削中...");
+    UI.toggleBatchProgress(true);
+
+    try {
+      for (let i = 0; i < ungraded.length; i++) {
+        const s = ungraded[i];
+        UI.updateBatchProgress(Math.round((i / ungraded.length) * 100), `${i + 1} / ${ungraded.length}: ${s.studentName}`);
+
+        try {
+          const feedback = await Server.call('generateFeedbackAI', {
+            worksheetTitle: State.currentTask?.title || "",
+            rubricHtml: State.currentTask?.rubricHtml || "",
+            selfEvaluation: s.textContent || "",
+            studentName: s.studentName || ""
+          });
+
+          await Server.call('saveFeedback', {
+            rowIndex: s.rowIndex,
+            feedbackText: feedback
+          });
+        } catch(e) {
+          console.error(`Feedback for ${s.studentName} failed:`, e);
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      UI.updateBatchProgress(100, '完了');
+      UI.toast('AI一括添削が完了しました');
+      // ダッシュボードを更新
+      await Modals.openDashboard();
+    } finally {
+      setTimeout(() => {
+        UI.toggleBatchProgress(false);
+        UI.hideLoading();
+      }, 1000);
+    }
+  },
+
+  renderEvalChart: (evalCounts, total) => {
+    if (!evalCounts || total === 0) return '<p class="text-muted small">自己評価データなし</p>';
+
+    let html = '<div class="row g-2">';
+    for (const [label, counts] of Object.entries(evalCounts)) {
+      const sum = counts['◎'] + counts['◯'] + counts['△'];
+      if (sum === 0) continue;
+      html += `
+        <div class="col-md-4">
+          <div class="p-2 bg-light rounded">
+            <div class="fw-bold small mb-2">${label}</div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="small" style="width:20px">◎</span>
+              <div class="progress flex-grow-1" style="height:16px;"><div class="progress-bar bg-success" style="width:${Math.round((counts['◎']/sum)*100)}%">${counts['◎']}</div></div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="small" style="width:20px">◯</span>
+              <div class="progress flex-grow-1" style="height:16px;"><div class="progress-bar bg-primary" style="width:${Math.round((counts['◯']/sum)*100)}%">${counts['◯']}</div></div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <span class="small" style="width:20px">△</span>
+              <div class="progress flex-grow-1" style="height:16px;"><div class="progress-bar bg-warning" style="width:${Math.round((counts['△']/sum)*100)}%">${counts['△']}</div></div>
+            </div>
+          </div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+  },
+
   // --- Other Utils ---
   generateRubric: async () => {
     UI.showLoading("ルーブリック作成中...");
@@ -1240,7 +1427,65 @@ const App = {
     new bootstrap.Modal(document.getElementById('shareModal')).show();
   },
 
-  processOcrImport: async () => { /* OCR placeholder */ },
+  processOcrImport: async () => {
+    const input = document.getElementById('ocrFileInput');
+    if (!input.files || !input.files[0]) return Swal.fire('ファイルを選択してください', '', 'warning');
+
+    const file = input.files[0];
+    UI.showLoading("資料を解析中...", "テキストを抽出しています");
+
+    try {
+      let fullText = '';
+
+      if (file.type === 'application/pdf') {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          UI.showLoading("資料を解析中...", `ページ ${i} / ${pdf.numPages} を処理中`);
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          fullText += `--- ページ ${i} ---\n${pageText}\n\n`;
+        }
+      } else if (file.type.startsWith('image/')) {
+        fullText = "[画像ファイル] ファイル名: " + file.name + "\n※画像のテキスト抽出にはPDF形式への変換を推奨します。";
+      }
+
+      State.ocrCache = fullText;
+
+      // プレビュー表示
+      const preview = document.getElementById('ocrPreview');
+      const previewText = document.getElementById('ocrPreviewText');
+      if (preview && previewText) {
+        previewText.value = fullText.substring(0, 2000) + (fullText.length > 2000 ? '\n...(省略)' : '');
+        preview.classList.remove('d-none');
+      }
+      UI.hideLoading();
+
+      const result = await Swal.fire({
+        title: '解析完了',
+        text: `${fullText.length}文字のテキストを抽出しました。この資料を元にワークシートを作成しますか？`,
+        icon: 'success',
+        showCancelButton: true,
+        confirmButtonText: '資料を元にAI作成',
+        cancelButtonText: 'あとで使う'
+      });
+
+      bootstrap.Modal.getInstance(document.getElementById('pdfImportModal'))?.hide();
+
+      if (result.isConfirmed && State.currentTask) {
+        App.generateSingleWorksheet(true);
+      } else if (result.isConfirmed && !State.currentTask) {
+        UI.toast('先に授業を選択してから「再生成」してください', 'info');
+      }
+    } catch (e) {
+      console.error(e);
+      Swal.fire('解析エラー', 'ファイルの読み取りに失敗しました: ' + e.message, 'error');
+    } finally {
+      UI.hideLoading();
+    }
+  },
 
   initFabric: () => {
     if (!State.fabricCanvas) {

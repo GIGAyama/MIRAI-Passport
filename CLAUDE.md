@@ -4,14 +4,14 @@
 
 MIRAI Passport is a Google Apps Script (GAS) web application for Japanese elementary school education. It generates AI-powered worksheets, manages student submissions, and integrates with a companion system called "みらいコンパス" (Mirai Compass) for class management.
 
-**Current version:** v2.2.0 (Phase 4: AI Coaching)
+**Current version:** v2.3.0 (Phase 5: AI Grading, Analytics, PDF/OCR)
 
 ## Architecture
 
 - **Backend:** Google Apps Script (serverless, deployed as a GAS web app)
 - **Frontend:** Single-page HTML app with vanilla JavaScript, Bootstrap 5
 - **Database:** Google Sheets (via `SpreadsheetApp` API)
-- **AI:** Google Gemini API (gemini-2.5-flash) for worksheet and rubric generation
+- **AI:** Google Gemini API (gemini-2.5-flash) for worksheet generation, rubric generation, and AI-assisted grading
 - **No build system, no npm, no TypeScript** - all dependencies are loaded via CDN or built into GAS
 
 ## File Structure
@@ -53,8 +53,9 @@ Three sheets act as tables:
 | Config management | 79-94 | `saveUserConfig()`, `getUserConfig()` |
 | Database operations | 100-170 | CRUD for Worksheets sheet |
 | Student responses | 176-262 | CRUD for Responses sheet, peer reactions |
-| AI & utilities | 268-314 | `callGeminiAPI()`, `generateSingleWorksheet()`, `generateRubricAI()` |
-| Compass integration | 320-385 | Import queue processing, sync to Compass |
+| AI & utilities | 268-325 | `callGeminiAPI()`, `generateSingleWorksheet()`, `generateRubricAI()` |
+| AI grading & analytics | 327-390 | `generateWorksheetWithRubric()`, `generateFeedbackAI()`, `getClassAnalytics()` |
+| Compass integration | 395-450 | Import queue processing, sync to Compass |
 
 ### js.html (Frontend)
 | Object | Purpose |
@@ -62,9 +63,9 @@ Three sheets act as tables:
 | `Server` | Promise wrapper around `google.script.run` |
 | `UI` | Loading overlay, toasts, batch progress |
 | `Printer` | Unified A4 print system (opens new window) |
-| `Modals` | Dashboard, grading, rubric, settings, import modals |
+| `Modals` | Dashboard, grading, rubric, settings, import, analytics modals |
 | `State` | Global state: currentTask, fabricCanvas, studentId, etc. |
-| `App` | Main application logic: init, task selection, AI generation, student submission, Plaza |
+| `App` | Main application logic: init, task selection, AI generation, AI grading, student submission, Plaza, PDF/OCR |
 | `Editor` | Rich editing: context menus, table manipulation, resizing |
 
 ### css.html (Styles)

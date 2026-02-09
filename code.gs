@@ -204,7 +204,7 @@ function getTaskSubmissions(taskId) {
     .filter(o => o.rowIndex > 1 && String(o.r[1]) === String(taskId))
     .map(o => ({
       rowIndex: o.rowIndex, studentId: o.r[2], studentName: o.r[3], submittedAt: o.r[4],
-      canvasImage: o.r[5], status: o.r[7], feedbackText: o.r[8], canvasJson: o.r[11]
+      canvasImage: o.r[5], textContent: o.r[6], status: o.r[7], feedbackText: o.r[8], canvasJson: o.r[11]
     }));
 }
 
@@ -306,12 +306,97 @@ function generateSingleWorksheet(data) {
 }
 
 function generateRubricAI(data) {
-  return callGeminiAPI(`教育評価専門家としてルーブリック作成。単元:${data.unitName},活動:${data.stepTitle},内容:${data.description}。3観点3段階,HTMLテーブル形式(table table-bordered),具体的記述。HTMLのみ。`);
+  const prompt = `あなたは教育評価の専門家です。以下の授業活動に対するルーブリック（評価基準表）を作成してください。
+
+【単元名】${data.unitName || ""}
+【活動タイトル】${data.stepTitle || ""}
+【活動内容】${data.description || ""}
+
+【出力ルール】
+1. 3観点（知識・技能、思考・判断・表現、主体的に学習に取り組む態度）
+2. 各観点3段階（A:十分満足できる、B:おおむね満足できる、C:努力を要する）
+3. 各セルに具体的な児童の姿を簡潔に記述
+4. HTMLテーブル形式（class="table table-bordered"）で出力
+5. HTMLのみ出力（説明文不要）`;
+  return callGeminiAPI(prompt);
 }
 
 function getWebAppUrl(){ return ScriptApp.getService().getUrl(); }
 function safeJSONParse(s){ try { return JSON.parse(s); } catch (e) { return null; } }
 function ensureArray(val) { return Array.isArray(val) ? val : []; }
+
+// ==================================================
+// 5b. ワークシート+ルーブリック同時生成 & AI添削 & クラス分析
+// ==================================================
+
+function generateWorksheetWithRubric(data) {
+  const htmlContent = generateSingleWorksheet(data);
+  const rubricHtml = generateRubricAI(data);
+  return { htmlContent: htmlContent, rubricHtml: rubricHtml };
+}
+
+function generateFeedbackAI(data) {
+  const prompt = `あなたは小学校の先生のアシスタントです。以下の情報を元に、児童への添削コメントを作成してください。
+
+【ワークシートのタイトル】
+${data.worksheetTitle || ""}
+
+【評価基準（ルーブリック）】
+${data.rubricHtml || "（なし）"}
+
+【児童の自己評価】
+${data.selfEvaluation || "（なし）"}
+
+【児童名】${data.studentName || ""}
+
+【出力ルール】
+1. 児童の良い点を具体的に1〜2点褒める（自己評価の内容も参考にする）
+2. 改善点やアドバイスを1点、前向きな言い方で伝える
+3. 次の学習への意欲が湧くように励ます
+4. 小学生にわかりやすい優しい言葉で、3〜5文程度にまとめる
+5. テキストのみ出力（HTML不要）`;
+  return callGeminiAPI(prompt);
+}
+
+function getClassAnalytics(taskId) {
+  const sheet = getDbSpreadsheet().getSheetByName('Responses');
+  const values = sheet.getDataRange().getValues();
+  const responses = values.filter((r, i) => i > 0 && String(r[1]) === String(taskId));
+
+  const total = responses.length;
+  const submitted = responses.filter(r => r[7] === 'submitted').length;
+  const graded = responses.filter(r => r[7] === 'graded').length;
+  const draft = responses.filter(r => r[7] === 'draft').length;
+
+  // 自己評価パース
+  const evalCounts = {};
+  ['わかった', '考えた', '進んで'].forEach(label => {
+    evalCounts[label] = { '◎': 0, '◯': 0, '△': 0 };
+  });
+  responses.forEach(r => {
+    const text = String(r[6] || "");
+    const regex = /\[(.+?): (.+?)\]/g;
+    let m;
+    while ((m = regex.exec(text)) !== null) {
+      const label = m[1].trim();
+      const val = m[2].trim();
+      if (evalCounts[label] && evalCounts[label][val] !== undefined) {
+        evalCounts[label][val]++;
+      }
+    }
+  });
+
+  // 児童一覧
+  const students = responses.map(r => ({
+    studentId: r[2],
+    studentName: r[3],
+    status: r[7],
+    submittedAt: r[4] ? new Date(r[4]).getTime() : null,
+    hasFeedback: !!r[8]
+  }));
+
+  return { total, submitted, graded, draft, evalCounts, students };
+}
 
 // ==================================================
 // 6. Compass Integration (Shared DB Mode & Sync)
