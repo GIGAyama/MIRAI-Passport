@@ -1,0 +1,1073 @@
+<script>
+/**
+ * ============================================================
+ *  みらいパスポート v3.0.0 — コアロジック (js_core.html)
+ * ============================================================
+ *
+ * ■ このファイルの役割
+ *   アプリの中心となる共通ロジックを定義します。
+ *   先生モード・児童モードの両方で使われる基盤部分です。
+ *
+ * ■ モジュール構成
+ *   1. Server   — GAS バックエンドとの通信ラッパー
+ *   2. UI       — ローディング表示・トースト通知・進捗バー
+ *   3. Printer  — 印刷プレビュー生成（新しいウィンドウで印刷）
+ *   4. State    — アプリ全体の状態を保持するオブジェクト
+ *   5. App      — メインアプリケーションロジック
+ *      - 初期化・設定・タスク選択・履歴・保存
+ *      - キャンバス操作（手書き・画像挿入）
+ *   6. Editor   — リッチエディタ（右クリックメニュー・テーブル操作）
+ *
+ * ■ 分割設計
+ *   このファイルで App オブジェクトの基盤を定義し、
+ *   js_student.html と js_teacher.html が Object.assign で
+ *   モード固有の関数を追加する設計です。
+ *
+ *   読み込み順序（index.html で制御）:
+ *     1. js_core.html     ← このファイル（App の基盤定義）
+ *     2. js_student.html  ← 児童モードの関数を App に追加
+ *     3. js_teacher.html  ← 教師モードの関数を App に追加
+ *
+ * ============================================================
+ */
+
+
+/* ============================================================
+ *  1. Server — GAS バックエンドとの通信
+ * ============================================================
+ *
+ * google.script.run を Promise でラップし、
+ * async/await で使えるようにしたヘルパーです。
+ *
+ * 使い方:
+ *   const result = await Server.call('関数名', 引数1, 引数2);
+ *
+ * エラー時は自動的にローディングを閉じてエラーダイアログを表示します。
+ */
+const Server = {
+  /**
+   * GASのサーバー関数を呼び出す
+   * @param {string} funcName - code.gs で定義された関数名
+   * @param {...*} args       - 関数に渡す引数
+   * @return {Promise<*>} サーバーからの戻り値
+   */
+  call: (funcName, ...args) => {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler((error) => {
+          // エラー発生時: ローディングを閉じてダイアログ表示
+          UI.hideLoading();
+          console.error(`Server Error [${funcName}]:`, error);
+          Swal.fire('通信エラー', error.message || '予期せぬエラーが発生しました', 'error');
+          reject(error);
+        })
+        [funcName](...args);
+    });
+  }
+};
+
+
+/* ============================================================
+ *  2. UI — ユーザーインターフェースのユーティリティ
+ * ============================================================ */
+const UI = {
+  /**
+   * ローディングオーバーレイを表示する
+   * （パスポートが浮遊するアニメーション画面）
+   *
+   * @param {string} mainText - メインテキスト（例: "AIが執筆中です"）
+   * @param {string} subText  - サブテキスト（例: "しばらくお待ちください"）
+   */
+  showLoading: (mainText, subText) => {
+    if (!subText) subText = "しばらくお待ちください";
+    var txt = document.getElementById('loadingText');
+    var sub = document.getElementById('loadingSubText');
+    if (txt) txt.innerText = mainText;
+    if (sub) sub.innerText = subText;
+    var overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.remove('d-none');
+  },
+
+  /** ローディングオーバーレイを非表示にする */
+  hideLoading: () => {
+    var overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.add('d-none');
+  },
+
+  /**
+   * トースト通知（画面右上に小さく表示されて自動で消える）
+   * @param {string} title - 表示メッセージ
+   * @param {string} icon  - アイコン種別（'success' / 'error' / 'warning' / 'info'）
+   */
+  toast: (title, icon) => {
+    if (!icon) icon = 'success';
+    Swal.mixin({
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 2000
+    }).fire({ icon: icon, title: title });
+  },
+
+  /**
+   * 一括処理の進捗バーを更新する
+   * @param {number} percent - 進捗率（0〜100）
+   * @param {string} text    - 進捗テキスト（例: "3 / 10: 導入の活動"）
+   */
+  updateBatchProgress: (percent, text) => {
+    var bar = document.getElementById('batchProgressBar');
+    var txt = document.getElementById('batchProgressText');
+    if (bar) bar.style.width = percent + '%';
+    if (txt) txt.innerText = text;
+  },
+
+  /**
+   * 一括処理の進捗バーの表示/非表示を切り替える
+   * @param {boolean} show - true で表示、false で非表示
+   */
+  toggleBatchProgress: (show) => {
+    var el = document.getElementById('batchProgressContainer');
+    if (el) {
+      if (show) { el.classList.remove('d-none'); }
+      else      { el.classList.add('d-none'); }
+    }
+  }
+};
+
+
+/* ============================================================
+ *  3. Printer — 統合印刷システム
+ * ============================================================
+ *
+ * 新しいブラウザウィンドウを開き、印刷用HTMLを生成して
+ * 自動的に印刷ダイアログを表示します。
+ * 複数ページ（一括印刷）にも対応しています。
+ */
+const Printer = {
+  /**
+   * 印刷を実行する
+   * @param {Object[]} pages - 印刷するページの配列
+   * @param {string}   pages[].html - ページのHTML内容
+   * @param {string}   pages[].img  - オーバーレイ画像（Base64、手書きデータ）
+   */
+  run: (pages) => {
+    if (!pages || pages.length === 0) return;
+
+    // 新しいウィンドウを開く（ポップアップブロック対策が必要）
+    var win = window.open('', '_blank');
+    if (!win) {
+      return Swal.fire('エラー', 'ポップアップがブロックされました。許可してください。', 'error');
+    }
+
+    // 現在のページのスタイルを全てコピー（レイアウト再現のため）
+    var styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map(function(el) { return el.outerHTML; })
+      .join('');
+
+    // 印刷専用の追加CSS
+    var printCss = '<style>'
+      + 'body { margin: 0; padding: 0; background: white; font-family: "Zen Maru Gothic", sans-serif; }'
+      + '@media print {'
+      + '  @page { margin: 0; size: A4; }'
+      + '  body { margin: 0; padding: 0; }'
+      + '  .print-sheet {'
+      + '    width: 100%; height: auto; min-height: 297mm;'
+      + '    position: relative; box-sizing: border-box; padding: 15mm;'
+      + '    page-break-after: always; break-after: always; overflow: visible;'
+      + '  }'
+      + '  .print-sheet:last-child { page-break-after: auto; break-after: auto; }'
+      + '  .print-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }'
+      + '  .ws-box, .ws-lines, table, tr, .ws-header, h1 { break-inside: avoid; }'
+      + '  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
+      + '  .eval-btn:not(.active) { opacity: 0.1; border-color: #eee; }'
+      + '  .eval-btn.active { background: #333 !important; color: #fff !important; border-color: #333 !important; }'
+      + '  .btn, button:not(.eval-btn), .no-print { display: none !important; }'
+      + '}'
+      + '.print-sheet { border-bottom: 1px dashed #ccc; margin-bottom: 20px; }'
+      + '</style>';
+
+    // 各ページのHTML組み立て
+    var contentHtml = '';
+    pages.forEach(function(p) {
+      contentHtml += '<div class="print-sheet">'
+        + '<div class="print-content">' + p.html + '</div>'
+        + (p.img ? '<img src="' + p.img + '" class="print-overlay">' : '')
+        + '</div>';
+    });
+
+    // 印刷ウィンドウにHTMLを書き込み
+    win.document.write(
+      '<!DOCTYPE html><html><head><title>印刷プレビュー</title>'
+      + styles + printCss
+      + '</head><body class="print-only-container">'
+      + contentHtml
+      + '<script>'
+      + 'window.onload = function() {'
+      + '  setTimeout(function() { window.focus(); window.print(); try { window.close(); } catch(e) {} }, 1000);'
+      + '};'
+      + '<\/script></body></html>'
+    );
+    win.document.close();
+  }
+};
+
+
+/* ============================================================
+ *  4. State — アプリケーション全体の状態管理
+ * ============================================================
+ *
+ * アプリで共有する「今の状態」を一箇所にまとめています。
+ * どこからでも State.xxx で現在の状態を参照・変更できます。
+ */
+const State = {
+  /* --- モード ---
+   * 'teacher' または 'student'
+   * init() で一度だけ設定され、以降は変わらない */
+  mode: 'teacher',
+
+  /* --- データ --- */
+  unitData:     null,   // 読み込まれた単元データ全体 { unitInfo, tasks[] }
+  currentTask:  null,   // 現在選択中のタスク { id, title, description, ... }
+
+  /* --- キャンバス --- */
+  fabricCanvas:  null,  // メインのFabric.jsキャンバスインスタンス
+  peerCanvas:    null,  // 広場で友達の作品を表示するキャンバス
+  isDrawMode:    false, // 手書きモードが有効かどうか
+
+  /* --- 児童関連 --- */
+  studentId:     null,  // 児童のID（LocalStorage or コンパス連携から取得）
+  ocrCache:      "",    // OCR読み取りテキストのキャッシュ
+
+  /* --- 教師関連 --- */
+  gradingRow:       null, // 添削中の回答のスプレッドシート行番号
+  gradingCanvas:    null, // 添削用キャンバスインスタンス
+  dashboardData:    [],   // ダッシュボードに表示中の提出データ配列
+
+  /* --- 広場（ギャラリー） --- */
+  isGalleryMode:       false, // 広場表示中かどうか
+  currentPeerResponse: null,  // 詳細表示中の友達の回答データ
+
+  /* --- 児童用ワークシート一覧 --- */
+  studentWsList:       null   // 配信済みワークシートの軽量リスト（キャッシュ）
+};
+
+
+/* ============================================================
+ *  5. App — メインアプリケーションロジック
+ * ============================================================
+ *
+ * アプリの中心オブジェクト。初期化、タスク管理、保存、
+ * キャンバス操作など共通機能を定義しています。
+ *
+ * js_student.html と js_teacher.html が Object.assign で
+ * このオブジェクトにモード固有の関数を追加します。
+ */
+const App = {
+
+  /* ユーザー設定（loadConfig で読み込まれる） */
+  config: null,
+
+
+  /* ==========================================================
+   *  初期化
+   * ========================================================== */
+
+  /**
+   * アプリの起動処理（DOMContentLoaded で呼ばれる）
+   *
+   * 1. URLパラメータを解析して State に格納
+   * 2. モードに応じた初期化を実行
+   *    - 児童モード → App.initStudentMode()（js_student.html で定義）
+   *    - 先生モード → App.initTeacherMode()（js_teacher.html で定義）
+   */
+  init: async () => {
+    // --- URLパラメータの解析（APP_CONFIG よりも URL パラメータを優先） ---
+    var params = new URLSearchParams(window.location.search);
+
+    // モード判定を一元化（以降は State.mode を参照するだけでOK）
+    State.mode = params.get('mode')
+      || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.mode : 'teacher');
+
+    // その他のパラメータを取得
+    var taskId      = params.get('taskId')
+      || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.taskId : '');
+    var studentId   = params.get('studentId')
+      || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.studentId : '');
+    var studentName = params.get('studentName')
+      || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.studentName : '');
+    var importId    = params.get('importId')
+      || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.importId : '');
+
+    // --- 自己評価スタンプのクリック処理（両モード共通） ---
+    // ワークシート内の ◎ ○ △ ボタンをクリックすると選択状態になる
+    document.body.addEventListener('click', function(e) {
+      var btn = e.target.closest('.eval-btn');
+      if (btn) {
+        var cell = btn.closest('td');
+        if (cell) {
+          // 同じセル内の他のスタンプを非選択にして、クリックされたものだけ選択
+          cell.querySelectorAll('.eval-btn').forEach(function(b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+        }
+      }
+    });
+
+    // --- モード別の初期化処理を呼び出し ---
+    if (State.mode === 'student') {
+      // 児童モードの初期化（js_student.html で定義）
+      await App.initStudentMode(taskId, studentId, studentName);
+    } else if (State.mode === 'dashboard') {
+      // 管理画面モードの初期化（js_teacher.html で定義）
+      await App.initDashboardMode();
+    } else {
+      // 先生モードの初期化（js_teacher.html で定義）
+      await App.initTeacherMode(importId);
+    }
+  },
+
+  /**
+   * 初期セットアップ実行（「初期化開始」ボタンから呼ばれる）
+   * データベース用スプレッドシートを作成してページを再読込する
+   */
+  performSetup: async () => {
+    UI.showLoading("データベースを構築しています", "初期化処理を実行中...");
+    try {
+      await Server.call('performInitialSetup');
+      location.reload();
+    } catch (e) {
+      console.error(e);
+    }
+  },
+
+
+  /* ==========================================================
+   *  設定の読み込み・保存
+   * ========================================================== */
+
+  /**
+   * ユーザー設定をサーバーから読み込み、フォームに反映する。
+   * 設定には APIキー・教師名・コンパスURL が含まれる。
+   */
+  loadConfig: async () => {
+    var config = await Server.call('getUserConfig');
+
+    // 設定フォームがあれば値を反映（先生モードのみ存在する要素あり）
+    var apiKeyEl   = document.getElementById('apiKeyInput');
+    var nameEl     = document.getElementById('teacherNameInput');
+    var compassEl  = document.getElementById('compassUrlInput');
+    if (apiKeyEl)  apiKeyEl.value  = config.apiKey;
+    if (nameEl)    nameEl.value    = config.teacherName;
+    if (compassEl) compassEl.value = config.compassUrl || '';
+
+    // グローバルに保持（コンパス連携の sync 処理で使用）
+    App.config = config;
+
+    // 先生モードの場合: ローディングを閉じて履歴を読み込む
+    // （importId がある場合は別途 initTeacherMode で処理するので閉じない）
+    if (State.mode === 'teacher' && !window.location.search.includes('importId')) {
+      UI.hideLoading();
+      App.loadHistory();
+    }
+  },
+
+  /**
+   * 設定モーダルの「保存」ボタンから呼ばれる
+   * フォームの値をサーバーに送信して保存する
+   */
+  saveSettings: async () => {
+    await Server.call('saveUserConfig',
+      document.getElementById('apiKeyInput').value,
+      document.getElementById('teacherNameInput').value,
+      (document.getElementById('compassUrlInput') || {}).value || ''
+    );
+    UI.toast('設定を保存しました');
+    bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+    // 設定を再読込して最新状態にする
+    App.loadConfig();
+  },
+
+
+  /* ==========================================================
+   *  タスク選択 & ワークシート表示
+   * ========================================================== */
+
+  /**
+   * タスクIDでタスクを検索して選択する（サイドバーのクリックから呼ばれる）
+   * @param {string} taskId - 選択するタスクのID
+   */
+  selectTaskById: (taskId) => {
+    var task = State.unitData.tasks.find(function(t) { return t.id === taskId; });
+    if (task) App.selectTask(task);
+  },
+
+  /**
+   * 【児童モード】ワークシート内の入力欄を編集可能にする
+   *
+   * worksheetContent 全体は contenteditable="false" のまま、
+   * 入力用のクラス（ws-box, ws-lines, rich-editor, ws-answer）を持つ要素だけを
+   * contenteditable="true" にして、児童がタイピングできるようにする。
+   * ふりかえり欄（ws-lines）も対象。
+   */
+  enableStudentInputs: () => {
+    var ws = document.getElementById('worksheetContent');
+    if (!ws) return;
+    var inputs = ws.querySelectorAll('.ws-box, .ws-lines, .rich-editor, .ws-answer, [contenteditable="true"]');
+    for (var i = 0; i < inputs.length; i++) {
+      inputs[i].contentEditable = 'true';
+    }
+  },
+
+  /**
+   * タスクを選択してワークシートを表示する（メインのタスク切替処理）
+   *
+   * 1. State を更新し、UIを表示状態にする
+   * 2. サーバーからワークシートデータを読み込む
+   * 3. モードに応じた後処理を実行
+   *    - 児童: 手書きモード起動 → 前回の回答復元 → コンパス通知
+   *    - 先生: リサイズハンドル有効化
+   *
+   * @param {Object} task - タスクオブジェクト { id, title, description, ... }
+   */
+  selectTask: async (task) => {
+    State.currentTask = task;
+
+    // --- UI要素の表示切替 ---
+    var emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.classList.add('d-none');
+    document.getElementById('paperArea').classList.remove('d-none');
+    document.getElementById('editorToolbar').classList.remove('d-none');
+    document.getElementById('currentTaskTitle').innerText = task.title || "無題";
+
+    // キャンバスをリセット（前のタスクの描画を消す）
+    try { App.resetCanvas(); } catch(e) { console.warn(e); }
+
+    // 先生モードのみ本文を編集可能にする
+    document.getElementById('worksheetContent').contentEditable = (State.mode === 'teacher');
+
+    // --- サーバーからワークシートデータを読み込み ---
+    UI.showLoading("データを取得中...");
+    try {
+      var data = await Server.call('loadWorksheetFromDB', task.id);
+
+      if (data) {
+        // ワークシートが存在する場合: HTML本文を表示
+        document.getElementById('worksheetContent').innerHTML = data.htmlContent;
+        State.currentTask.rubricHtml = data.rubricHtml;
+        if (data.canvasJson) State.currentTask.canvasData = data.canvasJson;
+
+        // 【児童モード】手書きを起動し、前回の回答を復元する
+        if (State.mode === 'student') {
+          // 入力欄（ws-box, ws-lines, rich-editor 等）のみ編集可能にする
+          App.enableStudentInputs();
+          setTimeout(async () => {
+            App.toggleDrawMode(true);
+            // 自分の前回の回答を読み込む（js_student.html で定義）
+            if (typeof App.loadMyResponse === 'function') await App.loadMyResponse();
+            // コンパスに「作業中」を通知（js_student.html で定義）
+            if (typeof App.notifyCompass === 'function') {
+              App.notifyCompass('syncStatus', { status: '途中', mode: 'normal' });
+            }
+            // 児童用ツールバーを表示（js_student.html で定義）
+            if (typeof App.renderStudentToolbar === 'function') {
+              App.renderStudentToolbar();
+            }
+          }, 500);
+        }
+      } else {
+        // ワークシートが未作成の場合: プレースホルダーを表示
+        var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
+        document.getElementById('worksheetContent').innerHTML =
+          '<div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted" style="min-height: 297mm;">'
+          + '<div class="ws-header w-100"><div>' + (info.grade || '') + ' ' + (info.unitName || '') + '</div>'
+          + '<div>名前: __________________</div></div>'
+          + '<h1>' + task.title + '</h1>'
+          + '<div class="my-5 text-center">'
+          + '<p class="mb-4">この授業のワークシートはまだ作成されていません。</p>'
+          + '<button class="btn btn-primary btn-lg rounded-pill px-5 shadow-sm" onclick="App.generateSingleWorksheet()">'
+          + '<i class="bi bi-stars"></i> AIで作成する</button>'
+          + '</div></div>';
+      }
+
+      // 【先生モード】要素のリサイズハンドルを有効化
+      if (State.mode === 'teacher') Editor.enableResizing();
+
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+
+  /* ==========================================================
+   *  履歴管理
+   * ========================================================== */
+
+  /**
+   * 保存済みワークシートの履歴一覧を取得してサイドバーに表示する
+   * サーバーから最新30件を取得する
+   */
+  loadHistory: async () => {
+    var history = await Server.call('getHistory');
+    var list = document.getElementById('historyList');
+    if (!list) return;
+
+    list.innerHTML = '';
+    history.forEach(function(h) {
+      var btn = document.createElement('button');
+      btn.className = 'list-group-item list-group-item-action small py-2';
+      btn.innerHTML =
+        '<div class="fw-bold text-truncate">' + h.title + '</div>'
+        + '<small class="text-muted" style="font-size:0.75rem">'
+        + new Date(h.timestamp).toLocaleDateString() + ' '
+        + new Date(h.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+        + '</small>';
+      btn.onclick = function() { App.loadFromHistory(h.id); };
+      list.appendChild(btn);
+    });
+  },
+
+  /**
+   * 履歴からワークシートを復元する
+   *
+   * サーバーからデータを読み込み、State を再構築してから表示する。
+   * 児童モードではタスクIDで直接呼ばれる（配布URLからのアクセス時）。
+   * 先生モードでは履歴タブからのクリックで呼ばれる。
+   *
+   * @param {string} taskId - 復元するワークシートのタスクID
+   */
+  loadFromHistory: async (taskId) => {
+    UI.showLoading("履歴を展開中...", "データを復元しています");
+    try {
+      App.resetCanvas();
+      var data = await Server.call('loadWorksheetFromDB', taskId);
+
+      if (data) {
+        // --- UI要素の表示 ---
+        document.getElementById('paperArea').classList.remove('d-none');
+        document.getElementById('editorToolbar').classList.remove('d-none');
+        var emptyState = document.getElementById('emptyState');
+        if (emptyState) emptyState.classList.add('d-none');
+
+        // ワークシートの内容を表示
+        document.getElementById('worksheetContent').innerHTML = data.htmlContent;
+        document.getElementById('currentTaskTitle').innerText = data.stepTitle;
+        document.getElementById('worksheetContent').contentEditable = (State.mode === 'teacher');
+
+        // --- State を再構築（履歴からの復元なので全て作り直す） ---
+        var jsonSource = data.jsonSource || {};
+        State.currentTask = {
+          id:          data.taskId,
+          title:       data.stepTitle,
+          description: "",
+          canvasData:  data.canvasJson,
+          rubricHtml:  data.rubricHtml
+        };
+        // jsonSource の追加プロパティがあればマージ
+        var keys = Object.keys(jsonSource);
+        for (var i = 0; i < keys.length; i++) {
+          if (!State.currentTask.hasOwnProperty(keys[i])) {
+            State.currentTask[keys[i]] = jsonSource[keys[i]];
+          }
+        }
+        // タイトルはDB値を優先
+        State.currentTask.title = data.stepTitle;
+
+        State.unitData = {
+          unitInfo: { unitName: data.unitName || "復元された単元" },
+          tasks: [State.currentTask]
+        };
+
+        // --- モード別の後処理 ---
+        if (State.mode === 'teacher') {
+          // タスク一覧を更新（js_teacher.html で定義）
+          if (typeof App.renderTaskList === 'function') App.renderTaskList();
+          Editor.enableResizing();
+        }
+
+        if (State.mode === 'student') {
+          // 入力欄（ws-box, ws-lines, rich-editor 等）のみ編集可能にする
+          App.enableStudentInputs();
+          setTimeout(async () => {
+            App.toggleDrawMode(true);
+            if (typeof App.loadMyResponse === 'function') await App.loadMyResponse();
+            if (typeof App.notifyCompass === 'function') {
+              App.notifyCompass('syncStatus', { status: '途中', mode: 'normal' });
+            }
+            if (typeof App.renderStudentToolbar === 'function') {
+              App.renderStudentToolbar();
+            }
+            // ワークシート一覧のハイライトを更新
+            if (typeof App.renderStudentWorksheetPanel === 'function') {
+              if (State.studentWsList) {
+                App.renderStudentWorksheetPanel();
+              } else {
+                App.loadStudentWorksheetList();
+              }
+            }
+          }, 500);
+        }
+      } else {
+        Swal.fire('エラー', 'データが見つかりません。削除された可能性があります。', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      Swal.fire('読込エラー', '履歴の展開に失敗しました。', 'error');
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+
+  /* ==========================================================
+   *  保存 & 印刷
+   * ========================================================== */
+
+  /**
+   * 現在のワークシートをサーバーに保存する
+   * HTML本文・キャンバスデータ・ルーブリックをまとめて送信する
+   */
+  saveCurrentWorksheet: async () => {
+    if (!State.currentTask) return;
+
+    UI.showLoading("保存しています", "クラウドに同期中...");
+
+    // キャンバスのJSON取得（手書きがある場合）
+    var canvasJson = null;
+    if (State.fabricCanvas) canvasJson = State.fabricCanvas.toJSON();
+
+    var data = {
+      taskId:      State.currentTask.id,
+      unitName:    State.unitData ? (State.unitData.unitInfo || {}).unitName : "",
+      stepTitle:   State.currentTask.title,
+      htmlContent: document.getElementById('worksheetContent').innerHTML,
+      jsonSource:  State.currentTask,
+      canvasJson:  canvasJson,
+      rubricHtml:  State.currentTask.rubricHtml
+    };
+
+    try {
+      await Server.call('saveWorksheetToDB', data);
+      UI.toast("保存しました");
+
+      // 先生モードなら履歴を最新化
+      if (State.mode === 'teacher') App.loadHistory();
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+  /**
+   * 現在のワークシートを印刷する（1ページ分）
+   * 手書きキャンバスも画像として重ねて印刷する
+   */
+  printCurrentWorksheet: async () => {
+    if (!State.currentTask) return;
+
+    var html = document.getElementById('worksheetContent').innerHTML;
+    var img = null;
+    // キャンバスがあれば画像として出力（高解像度 x2）
+    if (State.fabricCanvas) {
+      img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
+    }
+    Printer.run([{ html: html, img: img }]);
+  },
+
+
+  /* ==========================================================
+   *  AIレスポンスのクリーニング
+   * ========================================================== */
+
+  /**
+   * AIが生成したテキストからコードブロック記法やbodyタグを除去する
+   * @param {string} text - AIの生成テキスト
+   * @return {string} クリーンなHTML文字列
+   */
+  cleanAIOutput: (text) => {
+    if (!text) return "";
+    return text
+      .replace(/```html/gi, "")
+      .replace(/```/g, "")
+      .replace(/^[\s\S]*?<body[^>]*>/i, "")
+      .replace(/<\/body>[\s\S]*$/i, "")
+      // 外部画像タグを除去（via.placeholder.com 等、AIが誤挿入する場合の安全策）
+      .replace(/<img\s+[^>]*src\s*=\s*["']https?:\/\/[^"']+["'][^>]*\/?>/gi, '<!-- 外部画像は非対応のため除去 -->')
+      .trim();
+  },
+
+
+  /* ==========================================================
+   *  キャンバス操作（Fabric.js による手書き・画像挿入）
+   * ========================================================== */
+
+  /**
+   * Fabric.js キャンバスを初期化する
+   * まだ作成されていない場合のみ新規作成する
+   */
+  initFabric: () => {
+    if (!State.fabricCanvas) {
+      var c = document.getElementById('drawCanvas');
+      if (c) State.fabricCanvas = new fabric.Canvas('drawCanvas', { isDrawingMode: false });
+    }
+  },
+
+  /**
+   * キャンバスをリセットする（タスク切替時に呼ばれる）
+   * 描画内容をクリアし、キャンバスインスタンスを破棄する
+   */
+  resetCanvas: () => {
+    if (State.fabricCanvas) {
+      try {
+        State.fabricCanvas.clear();
+        State.fabricCanvas.dispose();
+      } catch(e) { /* 破棄時のエラーは無視 */ }
+      State.fabricCanvas = null;
+    }
+    var cv = document.getElementById('drawCanvas');
+    if (cv) cv.classList.add('d-none');
+    App.toggleDrawMode(false);
+  },
+
+  /**
+   * 手書きモードの ON/OFF を切り替える
+   *
+   * ON にすると:
+   *   - キャンバスを表示してペンで描画可能にする
+   *   - 保存済みの描画データがあれば復元する
+   *   - ワークシート本文の編集をロックする
+   *
+   * OFF にすると:
+   *   - 描画を停止してキャンバスのクリックを無効化する
+   *   - 先生モードなら本文の編集を再度有効にする
+   *
+   * @param {boolean} [forceState] - 指定すると強制的にON/OFFを設定
+   */
+  toggleDrawMode: (forceState) => {
+    var newState = (forceState !== undefined) ? forceState : !State.isDrawMode;
+    State.isDrawMode = newState;
+
+    // UI要素の取得
+    var btn   = document.getElementById('btnDrawMode');
+    var tools = document.getElementById('drawTools');
+    var cv    = document.getElementById('drawCanvas');
+    var pp    = document.getElementById('paperArea');
+
+    // ボタンの見た目を切替（ON: 塗りつぶし / OFF: アウトライン）
+    if (btn) {
+      btn.classList.replace(
+        newState ? 'btn-outline-dark' : 'btn-dark',
+        newState ? 'btn-dark' : 'btn-outline-dark'
+      );
+    }
+
+    // 色選択・消しゴムツールの表示切替
+    if (tools) {
+      if (newState) { tools.classList.remove('d-none'); }
+      else          { tools.classList.add('d-none'); }
+    }
+
+    if (newState) {
+      // --- 手書きモード ON ---
+      if (cv) {
+        cv.classList.remove('d-none');
+        cv.style.position = 'absolute';
+        cv.style.left = '0';
+        cv.style.top = '0';
+        // 用紙サイズに合わせてキャンバスをリサイズ
+        if (pp) { cv.width = pp.offsetWidth; cv.height = pp.offsetHeight; }
+      }
+      // Fabric.js インスタンスの作成 or 有効化
+      if (!State.fabricCanvas && cv) {
+        try {
+          State.fabricCanvas = new fabric.Canvas('drawCanvas', {
+            isDrawingMode: true,
+            freeDrawingBrush: { width: 3, color: '#ff0000' }
+          });
+        } catch(e) { /* キャンバス初期化エラー */ }
+      } else if (State.fabricCanvas) {
+        State.fabricCanvas.isDrawingMode = true;
+      }
+      // 保存済みの描画データがあれば復元
+      if (State.currentTask && State.currentTask.canvasData && State.fabricCanvas) {
+        try { State.fabricCanvas.loadFromJSON(State.currentTask.canvasData); } catch(e) {}
+      }
+      // 手書き中は本文の直接編集を無効にする
+      document.getElementById('worksheetContent').contentEditable = false;
+    } else {
+      // --- 手書きモード OFF ---
+      if (State.fabricCanvas) State.fabricCanvas.isDrawingMode = false;
+      // キャンバスの上のクリックイベントを無効化
+      var cnt = document.querySelector('.canvas-container');
+      if (cnt) cnt.style.pointerEvents = 'none';
+      // 先生モードなら本文を編集可能に戻す
+      document.getElementById('worksheetContent').contentEditable = (State.mode === 'teacher');
+    }
+  },
+
+  /**
+   * ペンの色を変更する（色選択ピッカーの変更時に呼ばれる）
+   */
+  updateBrush: () => {
+    if (State.fabricCanvas) {
+      State.fabricCanvas.freeDrawingBrush.color = document.getElementById('penColor').value;
+    }
+  },
+
+  /**
+   * キャンバスの描画内容を全て消去する（消しゴムボタンから呼ばれる）
+   */
+  clearCanvas: () => {
+    if (State.fabricCanvas) State.fabricCanvas.clear();
+  },
+
+  /**
+   * 画像を挿入する
+   * - 手書きモード中: キャンバスにFabricオブジェクトとして追加
+   * - 通常モード: HTML内にimgタグとして埋め込み
+   *
+   * 画像は最大800pxにリサイズし、JPEG品質70%で圧縮する。
+   *
+   * @param {HTMLInputElement} input - ファイル入力要素
+   */
+  insertImage: (input) => {
+    if (input.files && input.files[0]) {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var img = new Image();
+        img.onload = function() {
+          // 画像のリサイズ（最大800px）
+          var c = document.createElement('canvas');
+          var ctx = c.getContext('2d');
+          var MAX = 800;
+          var w = img.width, h = img.height;
+          if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } }
+          else       { if (h > MAX) { w *= MAX / h; h = MAX; } }
+          c.width = w; c.height = h;
+          ctx.drawImage(img, 0, 0, w, h);
+          var dataUrl = c.toDataURL('image/jpeg', 0.7);
+
+          if (State.isDrawMode && State.fabricCanvas) {
+            // 手書きモード: キャンバスに画像オブジェクトとして追加
+            fabric.Image.fromURL(dataUrl, function(obj) {
+              obj.scaleToWidth(300);
+              State.fabricCanvas.add(obj);
+              State.fabricCanvas.centerObject(obj);
+            });
+          } else {
+            // 通常モード: HTML内にimgタグとして挿入
+            App.insertAtCursor(
+              '<img src="' + dataUrl + '" style="max-width:100%; border:1px solid #ccc; display:block; margin:10px auto;">'
+            );
+          }
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(input.files[0]);
+    }
+    // ファイル入力をリセット（同じファイルを再選択できるように）
+    input.value = '';
+  },
+
+  /**
+   * ワークシート本文のカーソル位置にHTMLを挿入する
+   * カーソルがない場合は末尾に追加する
+   *
+   * @param {string} html - 挿入するHTML文字列
+   */
+  insertAtCursor: (html) => {
+    var el = document.getElementById('worksheetContent');
+    el.focus();
+    var sel = window.getSelection();
+    if (sel.getRangeAt && sel.rangeCount) {
+      var range = sel.getRangeAt(0);
+      if (el.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        var div = document.createElement("div");
+        div.innerHTML = html;
+        var frag = document.createDocumentFragment();
+        var node;
+        while ((node = div.firstChild)) frag.appendChild(node);
+        range.insertNode(frag);
+        return;
+      }
+    }
+    // カーソルが見つからない場合は末尾に追加
+    el.insertAdjacentHTML('beforeend', html);
+  }
+};
+
+
+/* ============================================================
+ *  6. Editor — リッチエディタモジュール（先生モード用）
+ * ============================================================
+ *
+ * ワークシート本文の編集を補助する機能:
+ * - 右クリックメニュー（テーブルの行列追加・削除、ボックス複製・削除）
+ * - 要素のリサイズハンドル（ws-box, ws-lines を縦方向にリサイズ可能）
+ * - ホバー時のハイライト表示
+ */
+const Editor = {
+
+  /** 右クリックメニューで操作中の要素 */
+  currentTarget: null,
+
+  /**
+   * エディタを初期化する（先生モード起動時に一度だけ呼ばれる）
+   * - 右クリックメニュー用のDOM要素を作成
+   * - contextmenu イベントのリスナーを登録
+   */
+  init: () => {
+    // 右クリックメニュー用の div を作成して body に追加
+    var menu = document.createElement('div');
+    menu.id = 'ctxMenu';
+    menu.className = 'dropdown-menu shadow';
+    menu.style.position = 'fixed';
+    menu.style.display = 'none';
+    menu.style.zIndex = '9999';
+    document.body.appendChild(menu);
+
+    // ワークシート本文内で右クリックされたときの処理
+    document.addEventListener('contextmenu', function(e) {
+      var ws = document.getElementById('worksheetContent');
+      if (!ws || !ws.contains(e.target)) return;  // 本文外なら無視
+      if (document.getElementById('worksheetContent').contentEditable !== "true") return;  // 編集不可なら無視
+
+      e.preventDefault();  // ブラウザ標準のメニューを抑制
+      Editor.showContextMenu(e, menu);
+    });
+
+    // メニュー以外をクリックしたらメニューを閉じる
+    document.addEventListener('click', function() { menu.style.display = 'none'; });
+
+    // リサイズハンドルを有効化
+    Editor.enableResizing();
+  },
+
+  /**
+   * 記述欄（ws-box, ws-lines）のリサイズハンドルとホバーハイライトを有効化する。
+   * ワークシート読み込み後に毎回呼ばれる。
+   */
+  enableResizing: () => {
+    // 既存のスタイルがあれば削除して再生成
+    var oldStyle = document.getElementById('editor-style');
+    if (oldStyle) oldStyle.remove();
+
+    var style = document.createElement('style');
+    style.id = 'editor-style';
+    style.innerHTML =
+      '.ws-box, .ws-lines { resize: vertical; overflow: hidden; position: relative; min-height: 50px; }'
+      + '@media print { .ws-box, .ws-lines { resize: none; overflow: visible; } }'
+      + '#worksheetContent[contenteditable="true"] .ws-box:hover,'
+      + '#worksheetContent[contenteditable="true"] .ws-lines:hover,'
+      + '#worksheetContent[contenteditable="true"] table:hover {'
+      + '  outline: 2px dashed #a2d2ff; cursor: text;'
+      + '}';
+    document.head.appendChild(style);
+  },
+
+  /**
+   * 右クリックメニューを表示する
+   * クリック位置の要素に応じて異なるメニュー項目を出す
+   *
+   * @param {MouseEvent} e    - 右クリックイベント
+   * @param {HTMLElement} menu - メニュー用のDOM要素
+   */
+  showContextMenu: (e, menu) => {
+    var target = e.target;
+    var items = [];
+    Editor.currentTarget = target;
+
+    // --- テーブルのセル内で右クリックした場合 ---
+    var td = target.closest('td, th');
+    if (td) {
+      items = [
+        { label: '<i class="bi bi-arrow-bar-up"></i> 行を上に追加',    action: function() { Editor.tableAction('addRowUp', td); } },
+        { label: '<i class="bi bi-arrow-bar-down"></i> 行を下に追加',  action: function() { Editor.tableAction('addRowDown', td); } },
+        { divider: true },
+        { label: '<i class="bi bi-arrow-bar-left"></i> 列を左に追加',  action: function() { Editor.tableAction('addColLeft', td); } },
+        { label: '<i class="bi bi-arrow-bar-right"></i> 列を右に追加', action: function() { Editor.tableAction('addColRight', td); } },
+        { divider: true },
+        { label: '<i class="bi bi-trash"></i> 行を削除',               action: function() { Editor.tableAction('delRow', td); } },
+        { label: '<i class="bi bi-trash"></i> 列を削除',               action: function() { Editor.tableAction('delCol', td); } }
+      ];
+    }
+    // --- 記述欄（ws-box / ws-lines）で右クリックした場合 ---
+    else if (target.classList.contains('ws-box') || target.classList.contains('ws-lines')) {
+      items = [
+        { label: '<i class="bi bi-files"></i> ボックスを複製', action: function() { Editor.cloneElement(target); } },
+        { label: '<i class="bi bi-trash"></i> 削除',           action: function() { target.remove(); } }
+      ];
+    }
+    // --- その他の要素で右クリックした場合 ---
+    else {
+      items = [
+        { label: '<i class="bi bi-type-bold"></i> 太字', action: function() { document.execCommand('bold'); } },
+        { label: '<i class="bi bi-trash"></i> 削除',     action: function() { target.remove(); } }
+      ];
+    }
+
+    if (items.length === 0) return;
+
+    // --- メニューHTML組み立て ---
+    menu.innerHTML = '';
+    items.forEach(function(item) {
+      if (item.divider) {
+        menu.innerHTML += '<div class="dropdown-divider"></div>';
+      } else {
+        var a = document.createElement('a');
+        a.className = 'dropdown-item';
+        a.href = '#';
+        a.innerHTML = item.label;
+        a.onclick = function(ev) { ev.preventDefault(); item.action(); };
+        menu.appendChild(a);
+      }
+    });
+
+    // メニューをクリック位置に表示
+    menu.style.left = e.pageX + 'px';
+    menu.style.top = e.pageY + 'px';
+    menu.style.display = 'block';
+  },
+
+  /**
+   * テーブルの行・列を操作する
+   * @param {string}      type - 操作種別（addRowUp/addRowDown/addColLeft/addColRight/delRow/delCol）
+   * @param {HTMLElement}  cell - 操作対象のセル（td/th）
+   */
+  tableAction: (type, cell) => {
+    var row = cell.parentElement;
+    var table = row.parentElement.parentElement;
+    var rowIndex = row.rowIndex;
+    var colIndex = cell.cellIndex;
+
+    switch (type) {
+      case 'addRowUp':   table.insertRow(rowIndex);       break;
+      case 'addRowDown': table.insertRow(rowIndex + 1);   break;
+      case 'delRow':     table.deleteRow(rowIndex);       break;
+      case 'addColLeft':
+        for (var i = 0; i < table.rows.length; i++) table.rows[i].insertCell(colIndex);
+        break;
+      case 'addColRight':
+        for (var j = 0; j < table.rows.length; j++) table.rows[j].insertCell(colIndex + 1);
+        break;
+      case 'delCol':
+        for (var k = 0; k < table.rows.length; k++) table.rows[k].deleteCell(colIndex);
+        break;
+    }
+  },
+
+  /**
+   * 要素を複製する（ボックスの「複製」メニューから呼ばれる）
+   * @param {HTMLElement} el - 複製する要素
+   */
+  cloneElement: (el) => {
+    var clone = el.cloneNode(true);
+    el.after(clone);
+  }
+};
+
+
+/* ============================================================
+ *  起動: ページ読み込み完了時に App.init() を実行
+ * ============================================================ */
+document.addEventListener('DOMContentLoaded', App.init);
+</script>

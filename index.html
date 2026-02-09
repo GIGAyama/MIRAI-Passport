@@ -1,60 +1,154 @@
 <!DOCTYPE html>
 <html lang="ja">
+<!--
+  ============================================================
+  みらいパスポート v3.0.0 ─ index.html（全体構造）
+  ============================================================
+  このファイルはアプリの HTML テンプレートです。
+  GAS の HtmlService.createTemplateFromFile() で処理され、
+  サーバー側の変数（mode, taskId 等）が埋め込まれます。
+
+  ■ ファイル構成（読み込み順）
+    1. 外部ライブラリ（Bootstrap / Fabric.js / PDF.js 等）
+    2. css.html      … スタイル定義
+    3. APP_CONFIG     … サーバーから注入される設定値
+    4. HTML 本体      … ローディング → セットアップ → アプリ本体
+    5. js_core.html   … 共通ロジック（Server / UI / State / App / Editor）
+    6. js_student.html … 児童モード専用ロジック
+    7. js_teacher.html … 教師モード専用ロジック（Modals 含む）
+
+  ■ セクション目次
+    [1] HEAD ─ メタ情報・外部ライブラリ・CSS・設定値
+    [2] ローディング画面
+    [3] 初期セットアップウィザード
+    [4] アプリ本体
+      [4-1] ヘッダー（ナビゲーションバー）
+      [4-2] サイドバー（教師モードのみ）
+      [4-3] メインエリア（ワークシート表示・編集）
+      [4-4] 広場パネル（児童モードのみ）
+    [5] フッター
+    [6] モーダル群（設定・インポート・評価・共有 等）
+    [7] JavaScript 読み込み
+  ============================================================
+-->
 <head>
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>みらいパスポート</title>
-  
+
+  <!-- ===== 外部ライブラリ ===== -->
+  <!-- Bootstrap 5 : UI フレームワーク（グリッド・コンポーネント） -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons : アイコンフォント -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- Google Fonts : 丸ゴシック系フォント（児童にも読みやすい） -->
   <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=M+PLUS+Rounded+1c:wght@500;800&family=Poppins:wght@500;700&display=swap" rel="stylesheet">
-  
+
+  <!-- pako : gzip 圧縮／展開（キャンバスデータの圧縮保存用） -->
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+  <!-- Fabric.js : 手書きオーバーレイ用キャンバスライブラリ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <!-- PDF.js : 資料読込（PDF → 画像変換）用 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
 
+  <!-- ===== アプリ固有 CSS ===== -->
   <?!= include('css'); ?>
-  
+
+  <!-- ===== サーバーから注入される設定値 ===== -->
+  <!--
+    APP_CONFIG はサーバーサイド（Code.gs の doGet）でテンプレート変数として
+    セットされた値を JavaScript 側で使えるようにするオブジェクトです。
+    - mode       : 'teacher' または 'student'
+    - taskId     : URL パラメータで指定された課題 ID（児童モード時）
+    - studentId  : みらいコンパス連携用の児童 ID
+    - studentName: みらいコンパス連携用の児童名
+  -->
   <script>
-    // Config Injection from Server (Updated for Phase 2 Integration)
-    // 連携用の studentId, studentName を受け取れるようにクォート付きで展開
-    const APP_CONFIG = { 
-      mode: "<?= mode ?>", 
+    const APP_CONFIG = {
+      mode: "<?= mode ?>",
       taskId: "<?= taskId ?>",
-      studentId: "<?= studentId ?>",     // Phase 2: 連携用ID
-      studentName: "<?= studentName ?>"  // Phase 2: 連携用名前
+      studentId: "<?= studentId ?>",
+      studentName: "<?= studentName ?>",
+      importId: "<?= importId ?>"
     };
   </script>
 </head>
-<body class="<?= mode === 'student' ? 'student-mode' : '' ?>">
 
-  <!-- Loading Overlay -->
+<!-- body にモード別クラスを付与して、CSS でスタイルを切り替える -->
+<body class="<?= mode === 'student' ? 'student-mode' : (mode === 'dashboard' ? 'dashboard-mode' : '') ?>">
+
+  <!-- ============================================================
+       [2] ローディング画面
+       パスポートのページがパラパラめくれるアニメーション。
+       Server.call() 実行中に UI.showLoading() で表示される。
+       5枚のページがそれぞれ異なるスタンプデザインを持つ。
+       ============================================================ -->
   <div id="loadingOverlay" class="d-none">
-    <div class="scene">
-      <div class="passport">
-        <!-- ベース -->
-        <div class="pp-sheet back-plate"></div>
-        <div class="pp-sheet base-left"></div>
-        <div class="pp-sheet base-right"></div>
-        <!-- アニメーションページ -->
-        <div class="pp-sheet flipping-page"><div class="pp-face front design-1"></div><div class="pp-face back"></div></div>
-        <div class="pp-sheet flipping-page"><div class="pp-face front design-2"></div><div class="pp-face back"></div></div>
-        <div class="pp-sheet flipping-page"><div class="pp-face front design-3"></div><div class="pp-face back"></div></div>
-      </div>
-      <div class="loading-container">
-        <div class="loading-label" id="loadingText">準備中...</div>
-        <div class="loading-subtext" id="loadingSubText">しばらくお待ちください</div>
-        <div id="batchProgressContainer" class="d-none mt-3" style="width: 200px; margin: 0 auto;">
-          <div class="progress" style="height: 6px;"><div id="batchProgressBar" class="progress-bar bg-info" style="width:0%"></div></div>
-          <small id="batchProgressText" class="d-block mt-1 text-muted" style="font-size: 0.75rem;"></small>
+    <div class="pp-scene">
+      <div class="pp-book">
+        <!-- 裏表紙（青いカバー） -->
+        <div class="pp-sheet pp-cover"></div>
+        <!-- 左ページ（固定・ウォーターマーク付き） -->
+        <div class="pp-sheet pp-left"><span class="pp-wm">MIRAI<br>PASSPORT</span></div>
+        <!-- 右ページ（固定ベース・罫線パターン） -->
+        <div class="pp-sheet pp-right"></div>
+        <!-- めくれるページ（5枚・各ページにスタンプ＋テキストバー） -->
+        <div class="pp-sheet pp-flip">
+          <div class="pp-face pp-front pp-d1">
+            <div class="pp-stamp pp-stamp-circle"><i class="bi bi-star-fill"></i></div>
+            <div class="pp-bar"></div><div class="pp-bar"></div><div class="pp-bar"></div>
+          </div>
+          <div class="pp-face pp-back"></div>
         </div>
+        <div class="pp-sheet pp-flip">
+          <div class="pp-face pp-front pp-d2">
+            <div class="pp-stamp pp-stamp-rect"><i class="bi bi-compass-fill"></i></div>
+            <div class="pp-bar"></div><div class="pp-bar"></div>
+          </div>
+          <div class="pp-face pp-back"></div>
+        </div>
+        <div class="pp-sheet pp-flip">
+          <div class="pp-face pp-front pp-d3">
+            <div class="pp-stamp pp-stamp-diamond"><i class="bi bi-lightbulb-fill"></i></div>
+            <div class="pp-bar"></div><div class="pp-bar"></div><div class="pp-bar"></div>
+          </div>
+          <div class="pp-face pp-back"></div>
+        </div>
+        <div class="pp-sheet pp-flip">
+          <div class="pp-face pp-front pp-d4">
+            <div class="pp-stamp pp-stamp-rounded"><i class="bi bi-pencil-fill"></i></div>
+            <div class="pp-bar"></div><div class="pp-bar"></div>
+          </div>
+          <div class="pp-face pp-back"></div>
+        </div>
+        <div class="pp-sheet pp-flip">
+          <div class="pp-face pp-front pp-d5">
+            <div class="pp-stamp pp-stamp-circle"><i class="bi bi-trophy-fill"></i></div>
+            <div class="pp-bar"></div><div class="pp-bar"></div><div class="pp-bar"></div>
+          </div>
+          <div class="pp-face pp-back"></div>
+        </div>
+      </div>
+    </div>
+    <!-- テキスト表示エリア -->
+    <div class="loading-container">
+      <div class="loading-label" id="loadingText">準備中...</div>
+      <div class="loading-subtext" id="loadingSubText">しばらくお待ちください</div>
+      <!-- 一括処理時のプログレスバー（通常は非表示） -->
+      <div id="batchProgressContainer" class="d-none mt-3" style="width: 200px; margin: 0 auto;">
+        <div class="progress" style="height: 6px;"><div id="batchProgressBar" class="progress-bar bg-info" style="width:0%"></div></div>
+        <small id="batchProgressText" class="d-block mt-1 text-muted" style="font-size: 0.75rem;"></small>
       </div>
     </div>
   </div>
 
-  <!-- Setup -->
+  <!-- ============================================================
+       [3] 初期セットアップウィザード
+       スプレッドシートが未設定の場合に表示される。
+       App.performSetup() で初期化を実行する。
+       ============================================================ -->
   <div id="setupWizard" class="container d-none vh-100 d-flex align-items-center justify-content-center">
     <div class="card shadow-lg p-5 text-center" style="max-width: 600px;">
       <h1 class="text-primary mb-4"><i class="bi bi-stars"></i> みらいパスポート</h1>
@@ -62,61 +156,85 @@
     </div>
   </div>
 
-  <!-- App -->
+  <!-- ============================================================
+       [4] アプリ本体
+       ============================================================ -->
   <div id="appContainer" class="d-none d-flex flex-column vh-100">
+
+    <!-- ==========================================================
+         [4-1] ヘッダー（ナビゲーションバー）
+         左: アプリ名・モードバッジ・画面切替（児童用）
+         右: 各種操作ボタン（モードにより表示内容が変わる）
+         ========================================================== -->
     <header class="navbar navbar-expand-lg navbar-light bg-white sticky-top shadow-sm px-4">
+      <!-- アプリ名 -->
       <a class="navbar-brand d-flex align-items-center" href="#">
         <i class="bi bi-journal-richtext text-primary fs-3 me-2"></i>
         <span class="fw-bold text-primary">みらいパスポート</span>
         <? if (mode === 'student') { ?> <span class="badge bg-success ms-2">児童モード</span> <? } ?>
+        <? if (mode === 'dashboard') { ?> <span class="badge bg-info ms-2">管理画面</span> <? } ?>
       </a>
-      
-      <!-- 児童用モード切替スイッチ (画面表示切替) -->
+
+      <!-- 児童用：ワークシート一覧ボタン ＋ モード切替スイッチ -->
       <? if (mode === 'student') { ?>
-        <div class="ms-4 d-flex bg-white border rounded-pill p-1 shadow-sm">
+        <button class="btn btn-sm btn-outline-success rounded-pill ms-3" onclick="App.toggleStudentSidebar()">
+          <i class="bi bi-list-ul me-1"></i>一覧
+        </button>
+        <div class="ms-2 d-flex bg-white border rounded-pill p-1 shadow-sm">
            <button id="btnModeWork" class="btn btn-sm btn-primary rounded-pill px-3" onclick="App.toggleGalleryMode(false)">ワークシート</button>
            <button id="btnModePlaza" class="btn btn-sm btn-light rounded-pill px-3" onclick="App.toggleGalleryMode(true)">みんなの広場</button>
         </div>
       <? } ?>
 
+      <!-- 右側ボタン群 -->
       <div class="ms-auto d-flex gap-2 align-items-center">
+
+        <!-- ── 教師モード（作成画面）のボタン ── -->
         <? if (mode === 'teacher') { ?>
           <button class="btn btn-outline-danger btn-sm" onclick="Modals.openPdfImport()"><i class="bi bi-file-pdf"></i> 資料読込</button>
           <button class="btn btn-primary btn-sm rounded-pill" onclick="App.startBatchGeneration()"><i class="bi bi-lightning-fill"></i> 一括生成</button>
           <button class="btn btn-secondary btn-sm rounded-pill" onclick="App.startBatchPrint()"><i class="bi bi-printer-fill"></i> 一括印刷</button>
           <div class="vr mx-2"></div>
           <button class="btn btn-outline-secondary btn-sm" onclick="Modals.openImport()">計画</button>
+          <button class="btn btn-outline-info btn-sm rounded-pill" onclick="App.goToDashboard()"><i class="bi bi-speedometer2 me-1"></i>管理</button>
           <button class="btn btn-light text-secondary" onclick="Modals.openSettings()"><i class="bi bi-gear-fill"></i></button>
-        <? } else { ?>
-          <!-- コンパス連携用ステータス切替 (SOS/集中/通常) -->
-          <div class="btn-group me-2 shadow-sm" role="group" aria-label="Status Mode">
-            <button type="button" class="btn btn-sm btn-outline-secondary active" id="btnStatusNormal" onclick="App.changeStudentStatus('normal')" title="順調">👍</button>
-            <button type="button" class="btn btn-sm btn-outline-danger" id="btnStatusFocus" onclick="App.changeStudentStatus('focus')" title="集中">🔥</button>
-            <button type="button" class="btn btn-sm btn-outline-warning" id="btnStatusSos" onclick="App.changeStudentStatus('sos')" title="SOS">🆘</button>
-          </div>
 
-          <!-- プライバシー設定 -->
+        <!-- ── ダッシュボード（管理画面）のボタン ── -->
+        <? } else if (mode === 'dashboard') { ?>
+          <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="App.dbRefresh()"><i class="bi bi-arrow-clockwise me-1"></i>更新</button>
+          <span id="dbSubmissionCount" class="text-muted small"></span>
+
+        <!-- ── 児童モードのボタン ── -->
+        <? } else { ?>
+          <!-- 広場への公開スイッチ -->
           <div class="form-check form-switch me-3" title="広場に公開するかどうか">
             <input class="form-check-input" type="checkbox" id="isPublicCheck" checked>
             <label class="form-check-label small" for="isPublicCheck">広場に公開</label>
           </div>
+          <!-- 自動保存インジケータ -->
           <span id="autoSaveIndicator" class="text-muted small me-2"><i class="bi bi-cloud-check"></i> 保存済</span>
+          <!-- 名前入力 -->
           <input type="text" id="studentNameInput" class="form-control form-control-sm" placeholder="名前" style="width:120px;">
-          <button class="btn btn-outline-primary btn-sm rounded-pill" onclick="App.submitStudentResponse('draft')">一時保存</button>
-          <button class="btn btn-success btn-sm rounded-pill fw-bold" onclick="App.submitStudentResponse('submitted')">提出</button>
         <? } ?>
       </div>
     </header>
 
+    <!-- メインボディ：サイドバー + ワークシート + 広場 の横並びレイアウト -->
     <div class="flex-grow-1 d-flex overflow-hidden relative" id="mainBodyArea">
-      <!-- 先生用サイドバー (児童モードでは非表示) -->
+
+      <!-- ==========================================================
+           [4-2] サイドバー（教師モードのみ）
+           授業リスト・履歴の 2 タブ構成
+           ========================================================== -->
       <? if (mode === 'teacher') { ?>
       <nav id="sidebar" class="bg-light border-end d-flex flex-column" style="width: 320px; min-width: 320px;">
+        <!-- タブ切替 -->
         <ul class="nav nav-tabs nav-fill">
           <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-tasks">授業リスト</button></li>
           <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-history" onclick="App.loadHistory()">履歴</button></li>
         </ul>
         <div class="tab-content flex-grow-1 overflow-auto">
+          <!-- 授業リストタブ -->
           <div class="tab-pane fade show active p-0" id="tab-tasks">
             <div class="p-2 bg-white border-bottom d-flex justify-content-between">
               <div class="form-check ms-2"><input class="form-check-input" type="checkbox" id="selectAllTasks" onchange="App.toggleSelectAll(this)"><label class="form-check-label small" for="selectAllTasks">全選択</label></div>
@@ -124,30 +242,135 @@
             </div>
             <div id="taskList" class="list-group list-group-flush"><div class="text-center text-muted mt-5 p-3"><p class="small">計画を読み込んでください</p></div></div>
           </div>
+          <!-- 履歴タブ -->
           <div class="tab-pane fade p-0" id="tab-history"><div id="historyList" class="list-group list-group-flush"></div></div>
         </div>
       </nav>
       <? } ?>
 
-      <!-- メインエリア (ワークシート) -->
+      <!-- ==========================================================
+           [4-2b] ダッシュボード（管理画面モード）
+           フィルター + 提出カードグリッド + 詳細プレビューの3カラム構成
+           ========================================================== -->
+      <? if (mode === 'dashboard') { ?>
+      <aside id="dbFilterPanel" class="db-filter-panel">
+        <!-- 統計サマリー -->
+        <div class="db-stats-card">
+          <div class="d-flex justify-content-between mb-2">
+            <span class="small fw-bold text-muted">提出状況</span>
+            <span id="dbStatsTotal" class="badge bg-secondary">0件</span>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <span id="dbStatsSubmitted" class="badge bg-success">提出 0</span>
+            <span id="dbStatsGraded" class="badge bg-primary">添削済 0</span>
+            <span id="dbStatsDraft" class="badge bg-warning text-dark">下書 0</span>
+          </div>
+        </div>
+
+        <!-- フィルター -->
+        <div class="p-3">
+          <label class="form-label small fw-bold mb-1">単元</label>
+          <select id="dbFilterUnit" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+            <option value="__all__">すべての単元</option>
+          </select>
+
+          <label class="form-label small fw-bold mb-1">授業</label>
+          <select id="dbFilterTask" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+            <option value="__all__">すべての授業</option>
+          </select>
+
+          <label class="form-label small fw-bold mb-1">ステータス</label>
+          <select id="dbFilterStatus" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+            <option value="__all__">すべて</option>
+            <option value="submitted">提出済のみ</option>
+            <option value="graded">添削済のみ</option>
+            <option value="draft">下書きのみ</option>
+            <option value="ungraded">未添削（提出済＋下書）</option>
+          </select>
+
+          <label class="form-label small fw-bold mb-1">並び順</label>
+          <select id="dbSortOrder" class="form-select form-select-sm" onchange="App.dbApplyFilter()">
+            <option value="newest">新しい順</option>
+            <option value="oldest">古い順</option>
+            <option value="name">名前順</option>
+            <option value="status">ステータス順</option>
+          </select>
+        </div>
+
+        <!-- 作成画面へのリンク -->
+        <div class="mt-auto p-3 border-top">
+          <a id="dbLinkToTeacher" href="#" class="btn btn-outline-secondary btn-sm w-100" onclick="App.dbGoTeacherMode()">
+            <i class="bi bi-pencil-square me-1"></i>作成画面に切替
+          </a>
+        </div>
+      </aside>
+
+      <!-- カードグリッド -->
+      <div id="dbMainArea" class="db-main-area">
+        <div id="dbGrid" class="db-grid"></div>
+      </div>
+
+      <!-- 詳細プレビュー（右パネル・カードクリックで表示） -->
+      <aside id="dbDetailPanel" class="db-detail-panel d-none">
+        <div class="db-detail-header">
+          <div class="d-flex align-items-center">
+            <button class="btn btn-sm btn-light me-2" onclick="App.dbCloseDetail()"><i class="bi bi-x-lg"></i></button>
+            <h6 id="dbDetailName" class="mb-0 fw-bold text-truncate"></h6>
+          </div>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-secondary" onclick="App.dbPrevSubmission()" title="前へ"><i class="bi bi-chevron-left"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="App.dbNextSubmission()" title="次へ"><i class="bi bi-chevron-right"></i></button>
+          </div>
+        </div>
+        <div id="dbDetailBody" class="db-detail-body">
+          <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+        </div>
+        <div class="db-detail-footer">
+          <div class="d-flex gap-2 mb-2">
+            <span id="dbDetailStatus" class="badge"></span>
+            <span id="dbDetailEval" class="small text-muted"></span>
+            <span id="dbDetailTime" class="small text-muted ms-auto"></span>
+          </div>
+          <div class="input-group">
+            <input type="text" id="dbFeedbackInput" class="form-control" placeholder="コメントを入力...">
+            <button class="btn btn-primary" onclick="App.dbSaveFeedback()"><i class="bi bi-send-fill me-1"></i>返却</button>
+          </div>
+        </div>
+      </aside>
+      <? } ?>
+
+      <!-- ==========================================================
+           [4-3] メインエリア（ワークシート表示・編集）
+           中央の用紙表示領域。ツールバー + 用紙 + 手書きキャンバス
+           ========================================================== -->
       <main id="workspaceContainer" class="flex-grow-1 bg-secondary bg-opacity-10 p-4 overflow-auto d-flex flex-column align-items-center relative transition-all">
+        <!-- エディタツールバー（課題選択後に表示） -->
         <div id="editorToolbar" class="bg-white rounded-pill shadow-sm px-4 py-2 mb-3 d-flex gap-3 align-items-center d-none sticky-top" style="top: 10px; z-index: 20;">
           <span id="currentTaskTitle" class="fw-bold text-truncate" style="max-width: 150px;">未選択</span>
           <div class="vr"></div>
+          <!-- 手書きモード -->
           <button id="btnDrawMode" class="btn btn-sm btn-outline-dark rounded-pill" onclick="App.toggleDrawMode()"><i class="bi bi-pencil-fill"></i> 手書き</button>
           <div id="drawTools" class="d-none d-flex gap-2">
             <input type="color" id="penColor" value="#ff0000" class="form-control form-control-color form-control-sm" onchange="App.updateBrush()">
             <button class="btn btn-sm btn-light" onclick="App.clearCanvas()"><i class="bi bi-eraser"></i></button>
           </div>
+          <!-- 画像挿入 -->
           <div class="dropdown">
             <button class="btn btn-sm btn-outline-dark rounded-pill dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-image"></i></button>
             <ul class="dropdown-menu"><li><button class="dropdown-item" onclick="document.getElementById('imgInput').click()">挿入...</button></li></ul>
             <input type="file" id="imgInput" class="d-none" accept="image/*" onchange="App.insertImage(this)">
           </div>
 
+          <!-- 教師モード専用ツール -->
           <? if (mode === 'teacher') { ?>
             <div class="vr"></div>
-            <button class="btn btn-sm btn-outline-primary rounded-pill" onclick="App.generateSingleWorksheet()">再生成</button>
+            <div class="dropdown">
+              <button class="btn btn-sm btn-outline-primary rounded-pill dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-stars me-1"></i>AI作成</button>
+              <ul class="dropdown-menu">
+                <li><button class="dropdown-item" onclick="App.generateSingleWorksheet()"><i class="bi bi-lightning-fill text-warning me-2"></i>API自動生成</button></li>
+                <li><button class="dropdown-item" onclick="App.openManualAiModal()"><i class="bi bi-clipboard-plus text-primary me-2"></i>手動AI（コピペ）</button></li>
+              </ul>
+            </div>
             <button class="btn btn-sm btn-outline-warning text-dark rounded-pill" onclick="Modals.openRubric()"><i class="bi bi-grid-3x3"></i> 評価</button>
             <button class="btn btn-sm btn-outline-info text-dark rounded-pill" onclick="Modals.openDashboard()"><i class="bi bi-people-fill"></i> 提出</button>
             <div class="dropdown">
@@ -159,49 +382,58 @@
               </ul>
             </div>
             <button class="btn btn-sm btn-success rounded-pill" onclick="App.saveCurrentWorksheet()">保存</button>
+          <!-- 児童モード専用ツール -->
           <? } else { ?>
              <div class="vr"></div>
+             <!-- フィードバック通知ボタン（先生からのコメントがある場合に表示） -->
              <button id="btnFeedback" class="btn btn-sm btn-warning rounded-pill d-none" onclick="App.showFeedback()"><i class="bi bi-envelope-exclamation-fill"></i></button>
           <? } ?>
         </div>
 
+        <!-- 用紙表示エリア -->
         <div class="sheet-scroll-area w-100 d-flex justify-content-center">
           <div class="sheet-container relative">
+            <!-- ワークシート本体（A4 用紙風） -->
             <div id="paperArea" class="sheet shadow-sm d-none">
               <div id="worksheetContent" class="h-100 w-100 p-5" contenteditable="<?= mode === 'teacher' ? 'true' : 'false' ?>"></div>
             </div>
+            <!-- 手書きオーバーレイキャンバス（Fabric.js） -->
             <canvas id="drawCanvas" class="d-none"></canvas>
           </div>
         </div>
       </main>
 
-      <!-- 広場パネル (右側分割) -->
+      <!-- ==========================================================
+           [4-4] 広場パネル（児童モードのみ）
+           右側に分割表示。友達のワークシート一覧 → 詳細 → リアクション
+           ========================================================== -->
       <aside id="plazaPanel" class="bg-white border-start d-flex flex-column d-none transition-all" style="width: 50%;">
+        <!-- 広場ヘッダー -->
         <div class="p-3 border-bottom d-flex justify-content-between align-items-center bg-light">
           <h5 class="mb-0 fw-bold text-primary"><i class="bi bi-collection-fill"></i> みんなの広場</h5>
           <button class="btn btn-sm btn-outline-secondary" onclick="App.toggleGalleryMode(false)"><i class="bi bi-x-lg"></i></button>
         </div>
-        
-        <!-- 一覧表示エリア -->
+
+        <!-- 一覧表示エリア（カードグリッド） -->
         <div id="plazaGrid" class="flex-grow-1 overflow-auto p-3 row g-3 align-content-start"></div>
-        
-        <!-- 詳細表示エリア (友達のワークシート) -->
+
+        <!-- 詳細表示エリア（友達のワークシート拡大表示） -->
         <div id="plazaDetail" class="d-none flex-column h-100">
+           <!-- 詳細ヘッダー -->
            <div class="p-2 bg-warning bg-opacity-10 border-bottom d-flex align-items-center">
              <button class="btn btn-sm btn-light me-2" onclick="App.closePlazaDetail()"><i class="bi bi-arrow-left"></i> 戻る</button>
              <span id="plazaDetailName" class="fw-bold"></span>
            </div>
-           
-           <!-- 友達のキャンバス表示用 -->
+
+           <!-- 友達のワークシート表示（縮小表示） -->
            <div class="flex-grow-1 bg-secondary bg-opacity-25 overflow-hidden position-relative d-flex justify-content-center align-items-center">
              <div id="plazaDetailCanvasContainer" class="shadow bg-white" style="transform: scale(0.6); transform-origin: center;">
-                <!-- 複製されたHTMLコンテンツがここに入る -->
                 <div id="plazaPeerContent" class="p-5" style="width:210mm; min-height:297mm;"></div>
                 <canvas id="plazaPeerCanvas" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
              </div>
            </div>
 
-           <!-- リアクションエリア -->
+           <!-- リアクションエリア（スタンプ＆コメント） -->
            <div class="p-3 border-top bg-white">
              <div class="d-flex gap-2 mb-2">
                <button class="btn btn-outline-warning rounded-circle p-2" onclick="App.sendReaction('stamp', '👍')">👍</button>
@@ -218,20 +450,54 @@
         </div>
       </aside>
 
+      <!-- ==========================================================
+           [4-5] 児童用ワークシート一覧サイドパネル
+           同じ単元のワークシートをリスト表示。クリックで遷移。
+           ========================================================== -->
+      <? if (mode === 'student') { ?>
+      <nav id="studentSidebar" class="student-sidebar d-none">
+        <div class="student-sidebar-header">
+          <h6 class="mb-0 fw-bold"><i class="bi bi-journal-text me-2"></i>ワークシート一覧</h6>
+          <button class="btn btn-sm btn-light" onclick="App.toggleStudentSidebar()"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="student-sidebar-filter">
+          <select id="studentUnitFilter" class="form-select form-select-sm" onchange="App.renderStudentWorksheetPanel()">
+            <option value="">読み込み中...</option>
+          </select>
+        </div>
+        <div id="studentWorksheetList" class="student-sidebar-list"></div>
+      </nav>
+      <? } ?>
+
     </div>
-    
-    <!-- Footer -->
+
+    <!-- ==========================================================
+         [5] フッター
+         ========================================================== -->
     <footer class="text-center text-muted py-3 mt-auto border-top bg-white">
-      <small>© 2026 みらいパスポート <a href="https://note.com/cute_borage86" target="_blank" class="text-decoration-none text-muted">GIGA山</a></small>
+      <small>&copy; 2026 みらいパスポート <a href="https://note.com/cute_borage86" target="_blank" class="text-decoration-none text-muted">GIGA山</a></small>
     </footer>
   </div>
 
-  <!-- Modals -->
+  <!-- ============================================================
+       [6] モーダル群
+       Bootstrap モーダルとして定義。Modals オブジェクト（js_teacher.html）
+       または App 関数から開かれる。
+       ============================================================ -->
+
+  <!-- 提出状況ダッシュボード（教師用） -->
   <div class="modal fade" id="dashboardModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">提出状況</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body bg-light"><div id="dashboardGrid" class="row g-3"></div></div></div></div></div>
+
+  <!-- 添削モーダル（フルスクリーン・教師用） -->
   <div class="modal fade" id="gradingModal" tabindex="-1"><div class="modal-dialog modal-fullscreen"><div class="modal-content"><div class="modal-header bg-dark text-white"><h5 class="modal-title" id="gradingTitle">添削</h5><button class="btn btn-light btn-sm ms-auto me-2" onclick="App.saveGrading()">返却</button><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body p-0 d-flex justify-content-center bg-secondary"><div id="gradingContainer" class="sheet-container m-4 scale-down"></div></div><div class="modal-footer"><input type="text" id="feedbackTextInput" class="form-control" placeholder="コメント..."></div></div></div></div>
+
+  <!-- 評価基準（ルーブリック）モーダル（教師用） -->
   <div class="modal fade" id="rubricModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header bg-warning bg-opacity-10"><h5 class="modal-title">評価基準</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="rubricContainer" class="p-3 border rounded bg-light mb-3" contenteditable="true" style="min-height: 200px;"></div></div><div class="modal-footer"><button class="btn btn-warning rounded-pill me-auto" onclick="App.generateRubric()">AI作成</button><button class="btn btn-primary" onclick="App.saveRubric()">保存</button></div></div></div></div>
+
+  <!-- 配布 URL 表示モーダル（教師用） -->
   <div class="modal fade" id="shareModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">配布URL</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="input-group"><input type="text" id="shareUrlInput" class="form-control" readonly><button class="btn btn-outline-secondary" onclick="navigator.clipboard.writeText(document.getElementById('shareUrlInput').value)"><i class="bi bi-clipboard"></i></button></div></div></div></div></div>
-  
+
+  <!-- 設定モーダル（教師用） -->
   <div class="modal fade" id="settingsModal" tabindex="-1">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -261,11 +527,27 @@
     </div>
   </div>
 
-  <div class="modal fade" id="importModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">計画読込</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><textarea id="jsonInput" class="form-control font-monospace mb-3" rows="10"></textarea><button class="btn btn-outline-secondary btn-sm" onclick="App.loadSampleJson()">サンプル</button></div><div class="modal-footer"><button class="btn btn-primary" onclick="App.processImport()">解析</button></div></div></div></div>
+  <!-- 計画読込は SweetAlert2 で動的に生成（Modals.openImport）するため HTML 不要 -->
+
+  <!-- 資料読込（PDF/画像 OCR）モーダル（教師用） -->
   <div class="modal fade" id="pdfImportModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">資料読込</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><input type="file" id="ocrFileInput" class="form-control" accept="application/pdf,image/*"></div><div class="modal-footer"><button class="btn btn-primary" onclick="App.processOcrImport()">解析</button></div></div></div></div>
 
+  <!-- ============================================================
+       [7] JavaScript 読み込み
+       Bootstrap JS → SweetAlert2 → アプリ JS（3 分割）の順で読み込む。
+
+       読み込み順序が重要：
+         1. js_core.html    … App / State / Server 等の基盤オブジェクトを定義
+         2. js_student.html  … Object.assign(App, {...}) で児童機能を追加
+         3. js_teacher.html  … Object.assign(App, {...}) で教師機能を追加
+
+       ※ v2.x では単一の js.html だったものを 3 ファイルに分割。
+         役割ごとにファイルが分かれているため、メンテナンスが容易です。
+       ============================================================ -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <?!= include('js'); ?>
+  <?!= include('js_core'); ?>
+  <?!= include('js_student'); ?>
+  <?!= include('js_teacher'); ?>
 </body>
 </html>

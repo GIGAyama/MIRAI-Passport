@@ -1,0 +1,765 @@
+<script>
+/**
+ * ============================================================
+ *  みらいパスポート v3.0.0 — 児童モード (js_student.html)
+ * ============================================================
+ *
+ * ■ このファイルの役割
+ *   児童（小学生）が使う画面のロジックを定義します。
+ *   js_core.html で定義された App オブジェクトに、
+ *   Object.assign で児童専用の関数を追加します。
+ *
+ * ■ 含まれる機能
+ *   1. 児童モードの初期化     — ID管理・自動保存ループの開始
+ *   2. 回答の保存・提出       — 一時保存（draft）と最終提出（submitted）
+ *   3. 自動保存               — 10秒ごとに LocalStorage へ下書きを保存
+ *   4. みんなの広場（ギャラリー）— 友達の作品を閲覧・リアクション送信
+ *   5. コンパス連携           — SOS・集中モードのステータス通知
+ *   6. 児童用ツールバー       — 用紙上部のタスク名・操作ボタン
+ *
+ * ■ 読み込み順序
+ *   js_core.html（App 定義）→ このファイル → js_teacher.html
+ *
+ * ============================================================
+ */
+
+Object.assign(App, {
+
+  /* ==========================================================
+   *  1. 児童モードの初期化
+   * ==========================================================
+   *
+   * App.init() から呼ばれる。以下の処理を行う:
+   *   - 児童IDの確定（コンパス連携 or LocalStorage or 新規生成）
+   *   - 自動保存ループの開始（10秒間隔）
+   *   - ワークシートの読み込み開始
+   */
+
+  /**
+   * 児童モードの起動処理
+   *
+   * @param {string} taskId      - 開く課題のID（URLパラメータから）
+   * @param {string} studentId   - 児童ID（コンパス連携時に自動付与）
+   * @param {string} studentName - 児童名（コンパス連携時に自動付与）
+   */
+  initStudentMode: async (taskId, studentId, studentName) => {
+
+    // --- 児童IDの確定 ---
+    if (studentId && studentName) {
+      // コンパス連携: パラメータで渡されたIDと名前を使用
+      State.studentId = studentId;
+      localStorage.setItem('manabi_sid', studentId);
+      // 名前入力欄があれば自動入力
+      var nameInput = document.getElementById('studentNameInput');
+      if (nameInput) nameInput.value = studentName;
+    } else {
+      // 通常起動: LocalStorage から前回のIDを復元
+      State.studentId = localStorage.getItem('manabi_sid');
+      if (!State.studentId) {
+        // 初回アクセス: 新しいIDを生成して保存
+        State.studentId = 'S_' + Date.now() + Math.random().toString(36).substr(2, 5);
+        localStorage.setItem('manabi_sid', State.studentId);
+      }
+    }
+
+    // --- 自動保存ループの開始（10秒ごと） ---
+    setInterval(App.autoSaveLocal, 10000);
+
+    // --- ワークシートの読み込み ---
+    UI.showLoading("ワークシートを準備しています", "課題データをダウンロード中...");
+    document.getElementById('appContainer').classList.remove('d-none');
+
+    if (taskId) {
+      // 設定を読み込み（コンパスURL等が必要）→ ワークシートを開く
+      await App.loadConfig();
+      App.loadFromHistory(taskId);
+    } else {
+      UI.hideLoading();
+      Swal.fire('エラー', '課題IDが無効です。URLを確認してください。', 'error');
+    }
+  },
+
+
+  /* ==========================================================
+   *  2. 回答の保存・提出
+   * ========================================================== */
+
+  /**
+   * 児童の回答をサーバーに送信する
+   *
+   * 「一時保存」ボタン → status = 'draft'
+   * 「提出」ボタン     → status = 'submitted'
+   *
+   * 送信するデータ:
+   *   - キャンバスの画像スナップショット（PNG, 低解像度）
+   *   - キャンバスのJSON（後で復元可能な形式）
+   *   - 自己評価テキスト（◎ ○ △ の選択内容）
+   *   - 広場への公開フラグ
+   *
+   * → 書き込み先: Responses シート（code.gs の saveStudentResponse）
+   *
+   * @param {string} status - 'draft'（一時保存）または 'submitted'（提出）
+   */
+  submitStudentResponse: async (status) => {
+    // 名前の取得
+    var nameInput = document.getElementById('studentNameInput');
+    var name = nameInput ? nameInput.value : APP_CONFIG.studentName;
+
+    // 公開設定の取得
+    var isPublicCheck = document.getElementById('isPublicCheck');
+    var isPublic = isPublicCheck ? isPublicCheck.checked : true;
+
+    // 提出時は名前必須
+    if (!name && status === 'submitted') {
+      return Swal.fire('名前を入力してください', '', 'warning');
+    }
+
+    UI.showLoading(
+      status === 'draft' ? "一時保存中..." : "提出しています",
+      "先生にデータを送信中..."
+    );
+
+    try {
+      // キャンバスの画像スナップショット（低解像度で軽量化）
+      var img = "";
+      if (State.fabricCanvas) {
+        img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 0.5 });
+      }
+
+      // --- 自己評価の収集 ---
+      // ワークシート内のテーブルから ◎ ○ △ の選択状態を読み取る
+      var evalText = "";
+      var rows = document.querySelectorAll('#worksheetContent table tr');
+      rows.forEach(function(r) {
+        var label = r.querySelector('td:first-child');
+        var activeBtn = r.querySelector('.eval-btn.active');
+        if (label && activeBtn) {
+          var val = activeBtn.getAttribute('data-value') || activeBtn.innerText;
+          evalText += '[' + label.innerText + ': ' + val.trim() + '] ';
+        }
+      });
+
+      // --- サーバーに送信 ---
+      await Server.call('saveStudentResponse', {
+        taskId:      State.currentTask.id,
+        studentId:   State.studentId,
+        studentName: name || "名無し",
+        canvasImage: img,
+        canvasJson:  JSON.stringify(State.fabricCanvas ? State.fabricCanvas.toJSON() : {}),
+        textContent: evalText,
+        status:      status,
+        isPublic:    isPublic
+      });
+
+      // --- 提出完了後の処理 ---
+      if (status === 'submitted') {
+        // コンパスに「完了」を通知
+        App.notifyCompass('syncStatus', { status: 'done', mode: 'normal' });
+        // ローカルの下書きデータを削除
+        localStorage.removeItem('manabi_' + State.currentTask.id);
+      }
+
+      UI.toast(status === 'draft' ? "保存しました" : "提出しました！");
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+
+  /* ==========================================================
+   *  3. 自動保存 & 前回回答の復元
+   * ========================================================== */
+
+  /**
+   * キャンバスの状態を LocalStorage に自動保存する
+   * 10秒ごとに setInterval で呼ばれる。
+   *
+   * 保存先: localStorage の 'manabi_{taskId}' キー
+   * 保存形式: { j: キャンバスJSON, t: タイムスタンプ }
+   *
+   * ※ サーバーには送信しない（ローカルのみ）
+   * ※ 提出時に LocalStorage のデータは削除される
+   */
+  autoSaveLocal: () => {
+    // 児童モードでタスクが選択されキャンバスがある場合のみ
+    if (State.mode !== 'student' || !State.currentTask || !State.fabricCanvas) return;
+
+    var key = 'manabi_' + State.currentTask.id;
+    localStorage.setItem(key, JSON.stringify({
+      j: State.fabricCanvas.toJSON(),
+      t: Date.now()
+    }));
+
+    // 「保存済」インジケータを更新
+    var ind = document.getElementById('autoSaveIndicator');
+    if (ind) ind.innerHTML = '<i class="bi bi-cloud-check"></i> ' + new Date().toLocaleTimeString();
+  },
+
+  /**
+   * サーバーから自分の前回回答を読み込む
+   *
+   * サーバーに回答データがあればそれを復元し、
+   * なければ LocalStorage の下書きを復元する。
+   *
+   * また、先生から添削（フィードバック）が届いている場合は
+   * 通知ボタンを表示する。
+   *
+   * → 読み込み元: Responses シート（code.gs の getMyResponse）
+   */
+  loadMyResponse: async () => {
+    var resp = await Server.call('getMyResponse', State.currentTask.id, State.studentId);
+
+    if (resp) {
+      // --- サーバーに回答データがある場合 ---
+      // キャンバスの描画を復元
+      if (resp.canvasJson && State.fabricCanvas) {
+        State.fabricCanvas.loadFromJSON(resp.canvasJson);
+      }
+
+      // 公開設定チェックボックスを復元
+      var chk = document.getElementById('isPublicCheck');
+      if (chk) chk.checked = (resp.isPublic === "" || resp.isPublic === true);
+
+      // 先生からのフィードバックがある場合: 通知ボタンを表示
+      if (resp.feedbackText || resp.status === 'graded') {
+        var btn = document.getElementById('btnFeedback');
+        if (btn) {
+          btn.classList.remove('d-none');
+          btn.onclick = function() {
+            Swal.fire({
+              title: '先生からのコメント',
+              text: resp.feedbackText || "（コメントなし）",
+              icon: 'info'
+            });
+          };
+          UI.toast("添削が届いています");
+        }
+      }
+    } else {
+      // --- サーバーに回答がない場合: LocalStorage から下書きを復元 ---
+      var local = localStorage.getItem('manabi_' + State.currentTask.id);
+      if (local && State.fabricCanvas) {
+        State.fabricCanvas.loadFromJSON(JSON.parse(local).j);
+        UI.toast("下書きを復元しました");
+      }
+    }
+  },
+
+
+  /* ==========================================================
+   *  4. みんなの広場（ギャラリー）
+   * ==========================================================
+   *
+   * 友達が提出したワークシートを閲覧し、
+   * スタンプやコメントでリアクションを送る機能。
+   * ヘッダーの「みんなの広場」ボタンで表示/非表示を切り替える。
+   */
+
+  /**
+   * 広場パネルの表示/非表示を切り替える
+   *
+   * 表示時: メインエリアを縮小し、右側に広場パネルを表示
+   * 非表示時: メインエリアを元に戻す
+   *
+   * @param {boolean} show - true で表示、false で非表示
+   */
+  toggleGalleryMode: async (show) => {
+    State.isGalleryMode = show;
+
+    var workspace = document.getElementById('workspaceContainer');
+    var plaza     = document.getElementById('plazaPanel');
+    var btnWork   = document.getElementById('btnModeWork');
+    var btnPlaza  = document.getElementById('btnModePlaza');
+
+    if (show) {
+      // --- 広場を開く ---
+      // モード切替ボタンの見た目を切替
+      if (btnWork)  btnWork.classList.replace('btn-primary', 'btn-light');
+      if (btnPlaza) btnPlaza.classList.replace('btn-light', 'btn-primary');
+      // メインエリアを縮小
+      if (workspace) workspace.classList.add('scale-down-mode');
+      // 広場パネルを表示
+      if (plaza) plaza.classList.remove('d-none');
+      // 友達の作品を読み込む
+      await App.loadPlazaItems();
+    } else {
+      // --- 広場を閉じる ---
+      if (btnWork)  btnWork.classList.replace('btn-light', 'btn-primary');
+      if (btnPlaza) btnPlaza.classList.replace('btn-primary', 'btn-light');
+      if (workspace) workspace.classList.remove('scale-down-mode');
+      if (plaza) plaza.classList.add('d-none');
+    }
+  },
+
+  /**
+   * 広場に表示する友達の作品をサーバーから取得する
+   *
+   * → 読み込み元: Responses シート（code.gs の getSharedResponses）
+   *   公開設定（isPublic）が true かつ提出済みの回答だけが返される。
+   *   自分の回答は除外して表示する。
+   */
+  loadPlazaItems: async () => {
+    var grid = document.getElementById('plazaGrid');
+    if (!grid) return;
+
+    // ローディング表示
+    grid.innerHTML = '<div class="text-center w-100 py-5"><div class="spinner-border text-primary"></div></div>';
+
+    try {
+      var items = await Server.call('getSharedResponses', State.currentTask.id);
+      grid.innerHTML = '';
+
+      if (!items || items.length === 0) {
+        grid.innerHTML = '<div class="col-12 text-center py-5 text-muted">まだ誰も提出していません</div>';
+      } else {
+        items.forEach(function(item) {
+          // 自分の回答は表示しない
+          if (item.studentId === State.studentId) return;
+
+          var col = document.createElement('div');
+          col.className = 'col-6';
+          col.innerHTML =
+            '<div class="card h-100 shadow-sm border-0" style="cursor:pointer; transition:transform 0.2s;" '
+            + 'onmouseover="this.style.transform=\'scale(1.02)\'" onmouseout="this.style.transform=\'scale(1)\'">'
+            + '<div class="bg-light d-flex align-items-center justify-content-center overflow-hidden position-relative" style="aspect-ratio: 210/297;">'
+            + '<img src="' + item.canvasImage + '" class="img-fluid" style="object-fit:contain;">'
+            + '</div>'
+            + '<div class="card-footer bg-white border-top-0 py-1 px-2 text-center">'
+            + '<small class="fw-bold text-truncate d-block">' + item.studentName + '</small>'
+            + '</div></div>';
+          col.onclick = function() { App.openPlazaDetail(item); };
+          grid.appendChild(col);
+        });
+      }
+    } catch(e) {
+      grid.innerHTML = '<div class="col-12 text-center py-5 text-danger">読み込みに失敗しました</div>';
+    }
+  },
+
+  /**
+   * 友達の作品の詳細を表示する
+   *
+   * 一覧表示を隠して、選択した友達のワークシートを大きく表示する。
+   * Fabric.js でキャンバスデータ（手書き部分）も再現する。
+   *
+   * @param {Object} item - 友達の回答データ（getSharedResponses の1件分）
+   */
+  openPlazaDetail: (item) => {
+    State.currentPeerResponse = item;
+    if (!Array.isArray(item.reactions)) item.reactions = [];
+
+    // 一覧 → 詳細の表示切替
+    document.getElementById('plazaGrid').classList.add('d-none');
+    document.getElementById('plazaDetail').classList.remove('d-none');
+    document.getElementById('plazaDetail').classList.add('d-flex');
+
+    // 友達の名前を表示
+    document.getElementById('plazaDetailName').innerText = item.studentName + ' さんの作品';
+
+    // ワークシートのHTML内容を複製して表示
+    var myContent = document.getElementById('worksheetContent').innerHTML;
+    document.getElementById('plazaPeerContent').innerHTML = myContent;
+
+    // --- 友達の手書きデータ（キャンバス）を再現 ---
+    var cvEl = document.getElementById('plazaPeerCanvas');
+    cvEl.width = 794;   // A4横幅に相当するピクセル
+    cvEl.height = 1123;  // A4縦幅に相当するピクセル
+
+    // 前のキャンバスがあれば破棄
+    if (State.peerCanvas) State.peerCanvas.dispose();
+
+    // 新しいFabricキャンバスを作成（選択不可＝閲覧専用）
+    State.peerCanvas = new fabric.Canvas('plazaPeerCanvas', { selection: false });
+
+    if (item.canvasJson) {
+      State.peerCanvas.loadFromJSON(item.canvasJson, function() {
+        // 全オブジェクトを選択不可にする（閲覧専用）
+        State.peerCanvas.forEachObject(function(o) { o.selectable = false; });
+        State.peerCanvas.renderAll();
+      });
+    }
+
+    // リアクション一覧を表示
+    App.renderPeerReactions(item.reactions);
+  },
+
+  /**
+   * 友達の作品の詳細表示を閉じて一覧に戻る
+   */
+  closePlazaDetail: () => {
+    document.getElementById('plazaDetail').classList.add('d-none');
+    document.getElementById('plazaDetail').classList.remove('d-flex');
+    document.getElementById('plazaGrid').classList.remove('d-none');
+    State.currentPeerResponse = null;
+  },
+
+  /**
+   * 友達の作品にリアクション（スタンプまたはコメント）を送る
+   *
+   * → 書き込み先: Responses シートの N列（code.gs の savePeerReaction）
+   *
+   * @param {string} type  - 'stamp'（スタンプ）または 'comment'（コメント）
+   * @param {string} value - スタンプの場合は絵文字、コメントの場合は未使用
+   */
+  sendReaction: async (type, value) => {
+    if (!State.currentPeerResponse) return;
+    if (!Array.isArray(State.currentPeerResponse.reactions)) {
+      State.currentPeerResponse.reactions = [];
+    }
+
+    // コメントの場合は入力欄から値を取得
+    var commentInput = document.getElementById('reactionComment');
+    var val = (type === 'comment') ? commentInput.value : value;
+    if (!val) return;
+
+    // 自分の名前を取得
+    var nameInput = document.getElementById('studentNameInput');
+    var myName = nameInput ? nameInput.value : '自分';
+
+    // リアクションオブジェクトを作成
+    var tempReaction = { type: type, value: val, fromName: myName };
+
+    // 画面に即座に反映（サーバー応答を待たない）
+    State.currentPeerResponse.reactions.push(tempReaction);
+    App.renderPeerReactions(State.currentPeerResponse.reactions);
+
+    // コメント欄をクリア
+    if (type === 'comment') commentInput.value = '';
+
+    // サーバーに保存
+    await Server.call('savePeerReaction', {
+      taskId:           State.currentTask.id,
+      targetResponseId: State.currentPeerResponse.responseId,
+      reaction:         tempReaction
+    });
+    UI.toast('送りました！');
+  },
+
+  /**
+   * リアクション一覧を画面に描画する（最新5件のみ表示）
+   *
+   * @param {Object[]} list - リアクション配列 [{ type, value, fromName }, ...]
+   */
+  renderPeerReactions: (list) => {
+    var div = document.getElementById('peerReactionsList');
+    div.innerHTML = '';
+    if (!Array.isArray(list) || list.length === 0) return;
+
+    // 最新5件だけ表示
+    list.slice(-5).forEach(function(r) {
+      var d = document.createElement('div');
+      d.className = 'border-bottom py-1';
+      d.innerHTML = '<span class="fw-bold me-2">' + r.fromName + '</span> ' + r.value;
+      div.appendChild(d);
+    });
+  },
+
+
+  /* ==========================================================
+   *  5. みらいコンパス連携（ステータス通知）
+   * ==========================================================
+   *
+   * みらいコンパス（外部LMS）と連携している場合、
+   * 児童の学習状況（作業中・SOS・集中・完了）を
+   * リアルタイムで先生側に通知します。
+   *
+   * → 送信先: code.gs の syncToCompass → compassUrl へ POST
+   */
+
+  /**
+   * コンパスへ通知を送る（Fire-and-forget＝送りっぱなし）
+   *
+   * コンパスURL が未設定の場合や児童モード以外では何もしない。
+   * 通信エラーがあってもユーザーには通知しない（バックグラウンド処理）。
+   *
+   * @param {string} action - アクション種別（例: 'syncStatus'）
+   * @param {Object} data   - 追加データ（例: { status: 'done', mode: 'normal' }）
+   */
+  notifyCompass: async (action, data) => {
+    if (!data) data = {};
+
+    // 送信条件: コンパスURL設定済み & 児童ID あり & 児童モード
+    if (!App.config || !App.config.compassUrl || !State.studentId) return;
+    if (State.mode !== 'student') return;
+
+    // 児童の名前を取得
+    var nameInput = document.getElementById('studentNameInput');
+    var studentName = nameInput ? nameInput.value : '';
+
+    // 送信するペイロードを組み立て
+    var payload = {
+      action:      action,
+      studentId:   State.studentId,
+      studentName: studentName,
+      taskId:      State.currentTask ? State.currentTask.id : '',
+      taskTitle:   State.currentTask ? State.currentTask.title : '',
+      timestamp:   new Date().getTime()
+    };
+    // 追加データをマージ
+    var keys = Object.keys(data);
+    for (var i = 0; i < keys.length; i++) {
+      payload[keys[i]] = data[keys[i]];
+    }
+
+    // サーバー経由で送信（エラーはコンソールに記録するだけ）
+    Server.call('syncToCompass', payload)
+      .then(function(res) {
+        if (!res.success) console.warn("Sync Warning:", res.error);
+      })
+      .catch(function(e) {
+        console.error("Sync Failed:", e);
+      });
+  },
+
+  /**
+   * 児童のステータス（順調 / 集中 / SOS）を変更する
+   *
+   * ワークシート内ツールバーの SOS / 集中ボタンから呼ばれる。
+   * コンパスに通知を送り、画面にトーストで状態を表示する。
+   *
+   * @param {string} mode - 'normal'（順調）/ 'focus'（集中）/ 'sos'（SOS）
+   */
+  changeStudentStatus: (mode) => {
+    // コンパスにステータスを通知
+    App.notifyCompass('syncStatus', { mode: mode, status: 'working' });
+
+    // ユーザーにフィードバック表示
+    var msg, icon;
+    if (mode === 'sos') {
+      msg = 'SOSを発信しました';
+      icon = 'warning';
+    } else if (mode === 'focus') {
+      msg = '集中モードを開始しました';
+      icon = 'info';
+    } else {
+      msg = 'ステータスを解除しました';
+      icon = 'info';
+    }
+    UI.toast(msg, icon);
+  },
+
+
+  /* ==========================================================
+   *  6. 児童用ツールバー
+   * ==========================================================
+   *
+   * 用紙の上部にタスク名と操作ボタンを表示する。
+   * selectTask / loadFromHistory でワークシート読み込み後に呼ばれる。
+   */
+
+  /**
+   * 児童用ツールバーを用紙内に表示する
+   *
+   * タスク名・SOSボタン・集中ボタン・提出ボタンを含む。
+   * ※一時保存は autoSaveLocal() で自動的に行われるためボタン不要。
+   * 既に存在する場合は一度削除してから再作成する。
+   */
+  renderStudentToolbar: () => {
+    var container = document.getElementById('paperArea');
+    if (!container) return;
+
+    // 既存ツールバーがあれば削除
+    var existing = document.getElementById('student-toolbar');
+    if (existing) existing.remove();
+
+    // ツールバーHTML要素の作成
+    var toolbar = document.createElement('div');
+    toolbar.id = 'student-toolbar';
+    toolbar.className = 'd-flex justify-content-between align-items-center mb-3 bg-white p-2 rounded shadow-sm sticky-top';
+    toolbar.style.top = '10px';
+    toolbar.style.zIndex = '1000';
+
+    toolbar.innerHTML =
+      '<div class="fw-bold text-primary px-2">'
+      + '<i class="bi bi-pencil-square me-2"></i>'
+      + (State.currentTask ? State.currentTask.title : 'ワークシート')
+      + '</div>'
+      + '<div class="d-flex gap-2">'
+      + '<button class="btn btn-outline-danger rounded-pill px-3 btn-sm fw-bold" onclick="App.changeStudentStatus(\'sos\')">'
+      + '<i class="bi bi-exclamation-circle-fill me-1"></i>SOS</button>'
+      + '<button class="btn btn-outline-info rounded-pill px-3 btn-sm fw-bold" onclick="App.changeStudentStatus(\'focus\')">'
+      + '<i class="bi bi-lightning-fill me-1"></i>集中</button>'
+      + '<button class="btn btn-success rounded-pill px-4 btn-sm fw-bold shadow-sm" onclick="App.submitStudentResponse(\'submitted\')">'
+      + '<i class="bi bi-send-fill me-1"></i>提出</button>'
+      + '</div>';
+
+    // コンテナの最上部に挿入
+    container.insertBefore(toolbar, container.firstChild);
+  },
+
+  /**
+   * 先生からのフィードバックを表示する
+   * （エディタツールバーの通知ボタンから呼ばれる）
+   */
+  showFeedback: () => {
+    // btnFeedback の onclick で動的にセットされるため、
+    // ここではフォールバックとしてのみ定義
+    Swal.fire({
+      title: '先生からのコメント',
+      text: 'まだコメントはありません',
+      icon: 'info'
+    });
+  },
+
+
+  /* ==========================================================
+   *  7. 児童用ワークシート一覧サイドパネル
+   * ==========================================================
+   *
+   * 配信済みのワークシートをサイドパネルにリスト表示し、
+   * クリックで別のワークシートに遷移できるようにする。
+   * 同じ単元のものだけ表示し、単元フィルターで切替可能。
+   */
+
+  /**
+   * サイドパネルの表示/非表示を切り替える
+   *
+   * 初回表示時にサーバーからワークシート一覧を取得する。
+   */
+  toggleStudentSidebar: () => {
+    var panel = document.getElementById('studentSidebar');
+    if (!panel) return;
+
+    var isHidden = panel.classList.contains('d-none');
+    if (isHidden) {
+      panel.classList.remove('d-none');
+      // 初回表示時のみデータを取得
+      if (!State.studentWsList) {
+        App.loadStudentWorksheetList();
+      }
+    } else {
+      panel.classList.add('d-none');
+    }
+  },
+
+  /**
+   * サーバーからワークシート一覧（軽量）を取得してキャッシュする
+   *
+   * 取得後、単元フィルタードロップダウンを構築し、
+   * 現在の単元を自動選択してリストを表示する。
+   */
+  loadStudentWorksheetList: async () => {
+    var listEl = document.getElementById('studentWorksheetList');
+    if (listEl) listEl.innerHTML = '<div class="text-center py-4"><div class="spinner-border spinner-border-sm text-success"></div></div>';
+
+    try {
+      var list = await Server.call('getStudentWorksheetList');
+      State.studentWsList = list || [];
+
+      // --- 単元フィルターを構築 ---
+      var filterEl = document.getElementById('studentUnitFilter');
+      if (filterEl) {
+        // 単元名の一覧を抽出（重複排除）
+        var unitNames = [];
+        State.studentWsList.forEach(function(ws) {
+          if (ws.unitName && unitNames.indexOf(ws.unitName) === -1) {
+            unitNames.push(ws.unitName);
+          }
+        });
+
+        filterEl.innerHTML = '';
+        // 「すべて」オプション
+        var optAll = document.createElement('option');
+        optAll.value = '__all__';
+        optAll.textContent = 'すべての単元 (' + State.studentWsList.length + '件)';
+        filterEl.appendChild(optAll);
+
+        // 各単元オプション
+        unitNames.forEach(function(name) {
+          var opt = document.createElement('option');
+          opt.value = name;
+          var count = State.studentWsList.filter(function(ws) { return ws.unitName === name; }).length;
+          opt.textContent = name + ' (' + count + '件)';
+          filterEl.appendChild(opt);
+        });
+
+        // 現在の単元を自動選択
+        var currentUnit = (State.unitData && State.unitData.unitInfo) ? State.unitData.unitInfo.unitName : '';
+        if (currentUnit && unitNames.indexOf(currentUnit) !== -1) {
+          filterEl.value = currentUnit;
+        }
+      }
+
+      App.renderStudentWorksheetPanel();
+    } catch (e) {
+      console.error(e);
+      if (listEl) listEl.innerHTML = '<div class="text-center py-4 text-danger small">読み込みに失敗しました</div>';
+    }
+  },
+
+  /**
+   * ワークシート一覧をサイドパネルに描画する
+   *
+   * 単元フィルターの選択に応じて表示内容を絞り込む。
+   * 現在表示中のワークシートにはハイライトを付ける。
+   */
+  renderStudentWorksheetPanel: () => {
+    var listEl = document.getElementById('studentWorksheetList');
+    if (!listEl || !State.studentWsList) return;
+
+    // --- フィルター取得 ---
+    var filterEl = document.getElementById('studentUnitFilter');
+    var unitFilter = filterEl ? filterEl.value : '__all__';
+
+    // --- フィルタリング ---
+    var filtered = State.studentWsList;
+    if (unitFilter && unitFilter !== '__all__') {
+      filtered = State.studentWsList.filter(function(ws) {
+        return ws.unitName === unitFilter;
+      });
+    }
+
+    // --- 描画 ---
+    listEl.innerHTML = '';
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div class="text-center py-4 text-muted small">ワークシートがありません</div>';
+      return;
+    }
+
+    var currentTaskId = State.currentTask ? State.currentTask.id : '';
+
+    // 単元名でグループ化して表示
+    var lastUnit = '';
+    filtered.forEach(function(ws) {
+      // 単元名ヘッダー（「すべて」表示時のみ）
+      if (unitFilter === '__all__' && ws.unitName !== lastUnit) {
+        lastUnit = ws.unitName;
+        var header = document.createElement('div');
+        header.className = 'student-ws-unit-header';
+        header.innerHTML = '<i class="bi bi-folder2 me-1"></i>' + (ws.unitName || '（単元名なし）');
+        listEl.appendChild(header);
+      }
+
+      var item = document.createElement('button');
+      item.className = 'student-ws-item' + (ws.taskId === currentTaskId ? ' active' : '');
+      item.innerHTML =
+        '<div class="d-flex align-items-center">'
+        + (ws.taskId === currentTaskId ? '<i class="bi bi-caret-right-fill text-success me-2"></i>' : '<i class="bi bi-file-earmark-text me-2 text-muted"></i>')
+        + '<span class="text-truncate">' + (ws.stepTitle || '無題') + '</span>'
+        + '</div>';
+      item.onclick = function() { App.navigateToWorksheet(ws.taskId); };
+      listEl.appendChild(item);
+    });
+  },
+
+  /**
+   * 別のワークシートに遷移する（サイドパネルのクリックから呼ばれる）
+   *
+   * 現在と同じタスクIDなら何もしない。
+   * 異なる場合は loadFromHistory で新しいワークシートを読み込む。
+   *
+   * @param {string} taskId - 遷移先のタスクID
+   */
+  navigateToWorksheet: (taskId) => {
+    if (State.currentTask && State.currentTask.id === taskId) return;
+
+    // サイドパネルを閉じる
+    var panel = document.getElementById('studentSidebar');
+    if (panel) panel.classList.add('d-none');
+
+    // ワークシートを読み込む
+    App.loadFromHistory(taskId);
+  }
+});
+</script>
