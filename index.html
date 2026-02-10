@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <!--
@@ -570,6 +571,25 @@
        Bootstrap モーダルとして定義。Modals オブジェクト（js_teacher.html）
        または App 関数から開かれる。
        ============================================================ -->
+
+  <!-- 印刷プレビューモーダル -->
+  <div class="modal fade" id="printModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content" style="height: 95vh;">
+        <div class="modal-header">
+          <h5 class="modal-title">印刷プレビュー</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div id="printModalBody" class="modal-body bg-secondary p-3 overflow-auto">
+          <!-- Preview content will be injected here -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="button" class="btn btn-primary" onclick="App.executePrint()">この内容で印刷する</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- 提出状況ダッシュボード（教師用） -->
   <div class="modal fade" id="dashboardModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">提出状況</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body bg-light"><div id="dashboardGrid" class="row g-3"></div></div></div></div></div>
