@@ -1,3 +1,4 @@
+
 <script>
 /**
  * ============================================================
@@ -137,80 +138,8 @@ const UI = {
 
 
 /* ============================================================
- *  3. Printer — 統合印刷システム
- * ============================================================
- *
- * 新しいブラウザウィンドウを開き、印刷用HTMLを生成して
- * 自動的に印刷ダイアログを表示します。
- * 複数ページ（一括印刷）にも対応しています。
- */
-const Printer = {
-  /**
-   * 印刷を実行する
-   * @param {Object[]} pages - 印刷するページの配列
-   * @param {string}   pages[].html - ページのHTML内容
-   * @param {string}   pages[].img  - オーバーレイ画像（Base64、手書きデータ）
-   */
-  run: (pages) => {
-    if (!pages || pages.length === 0) return;
-
-    // 新しいウィンドウを開く（ポップアップブロック対策が必要）
-    var win = window.open('', '_blank');
-    if (!win) {
-      return Swal.fire('エラー', 'ポップアップがブロックされました。許可してください。', 'error');
-    }
-
-    // 現在のページのスタイルを全てコピー（レイアウト再現のため）
-    var styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map(function(el) { return el.outerHTML; })
-      .join('');
-
-    // 印刷専用の追加CSS
-    var printCss = '<style>'
-      + 'body { margin: 0; padding: 0; background: white; font-family: "Zen Maru Gothic", sans-serif; }'
-      + '@media print {'
-      + '  @page { margin: 0; size: A4; }'
-      + '  body { margin: 0; padding: 0; }'
-      + '  .print-sheet {'
-      + '    width: 100%; height: auto; min-height: 297mm;'
-      + '    position: relative; box-sizing: border-box; padding: 15mm;'
-      + '    page-break-after: always; break-after: always; overflow: visible;'
-      + '  }'
-      + '  .print-sheet:last-child { page-break-after: auto; break-after: auto; }'
-      + '  .print-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }'
-      + '  .ws-box, .ws-lines, table, tr, .ws-header, h1 { break-inside: avoid; }'
-      + '  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
-      + '  .eval-btn:not(.active) { opacity: 0.1; border-color: #eee; }'
-      + '  .eval-btn.active { background: #333 !important; color: #fff !important; border-color: #333 !important; }'
-      + '  .btn, button:not(.eval-btn), .no-print { display: none !important; }'
-      + '}'
-      + '.print-sheet { border-bottom: 1px dashed #ccc; margin-bottom: 20px; }'
-      + '</style>';
-
-    // 各ページのHTML組み立て
-    var contentHtml = '';
-    pages.forEach(function(p) {
-      contentHtml += '<div class="print-sheet">'
-        + '<div class="print-content">' + p.html + '</div>'
-        + (p.img ? '<img src="' + p.img + '" class="print-overlay">' : '')
-        + '</div>';
-    });
-
-    // 印刷ウィンドウにHTMLを書き込み
-    win.document.write(
-      '<!DOCTYPE html><html><head><title>印刷プレビュー</title>'
-      + styles + printCss
-      + '</head><body class="print-only-container">'
-      + contentHtml
-      + '<script>'
-      + 'window.onload = function() {'
-      + '  setTimeout(function() { window.focus(); window.print(); try { window.close(); } catch(e) {} }, 1000);'
-      + '};'
-      + '<\/script></body></html>'
-    );
-    win.document.close();
-  }
-};
+ *  3. Printer — (削除) 新しいモーダル方式に置き換え
+ * ============================================================ */
 
 
 /* ============================================================
@@ -659,8 +588,7 @@ const App = {
   },
 
   /**
-   * 現在のワークシートを印刷する（1ページ分）
-   * 手書きキャンバスも画像として重ねて印刷する
+   * 現在のワークシートを印刷プレビューに表示する
    */
   printCurrentWorksheet: async () => {
     if (!State.currentTask) return;
@@ -671,7 +599,137 @@ const App = {
     if (State.fabricCanvas) {
       img = State.fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
     }
-    Printer.run([{ html: html, img: img }]);
+    App.openPrintPreview([{ html: html, img: img }]);
+  },
+
+  /**
+   * 印刷プレビューモーダルを開き、内容をレンダリングする
+   * @param {Object[]} pages - 印刷するページの配列
+   */
+  openPrintPreview: (pages) => {
+    if (!pages || pages.length === 0) return;
+
+    const modalBody = document.getElementById('printModalBody');
+    if (!modalBody) return;
+    modalBody.innerHTML = ''; // Clear previous content
+
+    const contentHtml = pages.map(p => {
+      return '<div class="print-sheet shadow-sm bg-white mx-auto">'
+        + '<div class="print-content">' + p.html + '</div>'
+        + (p.img ? '<img src="' + p.img + '" class="print-overlay">' : '')
+        + '</div>';
+    }).join('');
+
+    modalBody.innerHTML = contentHtml; // Only the content, no style tag here
+
+    // Dynamically add print-preview specific styles to the document head
+    let existingPreviewStyle = document.getElementById('print-preview-style');
+    if (existingPreviewStyle) existingPreviewStyle.remove(); // Remove old one if exists
+
+    const styleElement = document.createElement('style');
+    styleElement.id = 'print-preview-style';
+    styleElement.textContent = `
+      .print-sheet {
+        width: 210mm;
+        min-height: 297mm;
+        position: relative;
+        box-sizing: border-box;
+        padding: 15mm;
+        margin-bottom: 20px;
+        font-family: "Zen Maru Gothic", sans-serif; /* Ensure font is applied for preview */
+      }
+      .print-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 10;
+      }
+      /* Ensure other styles for preview like table borders, etc. are also present */
+      .table-bordered { border: 1px solid #dee2e6; }
+      .table-bordered th, .table-bordered td { border: 1px solid #dee2e6; }
+    `;
+    document.head.appendChild(styleElement);
+
+    const modal = new bootstrap.Modal(document.getElementById('printModal'));
+    modal.show();
+  },
+
+  /**
+   * 印刷モーダルの内容で実際の印刷を実行する
+   */
+  executePrint: () => {
+    // Get ALL children of printModalBody, which are the .print-sheet elements
+    const printSheetsHtml = Array.from(document.getElementById('printModalBody').children)
+                          .map(el => el.outerHTML).join(''); // This will get only the sheet HTML
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+        .map(el => el.outerHTML)
+        .join('');
+
+    const printCss = `<style>
+        body { margin: 0; padding: 0; font-family: "Zen Maru Gothic", sans-serif; }
+        @media print {
+          @page { margin: 0; size: A4; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0;}
+          .print-sheet {
+            width: 210mm;
+            height: 296mm; /* A bit less than 297mm to avoid issues, ~1mm shorter than A4 height */
+            position: relative;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 15mm;
+            page-break-after: always;
+            overflow: hidden; /* Ensure content doesn't spill outside print area */
+          }
+          .print-sheet:last-child { page-break-after: auto; }
+          .print-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+          }
+          .ws-box, .ws-lines, table, tr, .ws-header, h1 { break-inside: avoid; }
+          /* Ensure buttons and controls are hidden in print */
+          .btn, button, style { display: none !important; }
+        }
+    </style>`;
+
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><title></title>' + styles + printCss + '</head><body>' + printSheetsHtml + '</body></html>');
+    doc.close();
+
+    const images = doc.querySelectorAll("img");
+    const promises = [];
+    images.forEach(img => {
+        if (!img.complete) {
+            promises.push(new Promise(resolve => {
+                img.onload = resolve;
+                img.onerror = resolve;
+            }));
+        }
+    });
+
+    Promise.all(promises).then(() => {
+        setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            setTimeout(() => document.body.removeChild(iframe), 500);
+        }, 250);
+    });
   },
 
 
