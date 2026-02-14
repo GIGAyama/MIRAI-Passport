@@ -1204,5 +1204,11 @@ body.student-mode .ws-answer:empty::before {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+
+  /* コントロールパネル（動的ワークシート用）を印刷時に非表示 */
+  .no-print { display: none !important; }
+
+  /* SVG要素が印刷時にページ分断されないようにする */
+  svg { break-inside: avoid; page-break-inside: avoid; }
 }
 </style>

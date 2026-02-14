@@ -384,6 +384,7 @@ const App = {
       if (data) {
         // ワークシートが存在する場合: HTML本文を表示
         document.getElementById('worksheetContent').innerHTML = data.htmlContent;
+        App.activateWorksheetScripts(document.getElementById('worksheetContent'));
         State.currentTask.rubricHtml = data.rubricHtml;
         if (data.canvasJson) State.currentTask.canvasData = data.canvasJson;
 
@@ -481,6 +482,7 @@ const App = {
 
         // ワークシートの内容を表示
         document.getElementById('worksheetContent').innerHTML = data.htmlContent;
+        App.activateWorksheetScripts(document.getElementById('worksheetContent'));
         document.getElementById('currentTaskTitle').innerText = data.stepTitle;
         document.getElementById('worksheetContent').contentEditable = (State.mode === 'teacher');
 
@@ -713,6 +715,8 @@ const App = {
             page-break-inside: avoid;
           }
           .btn, button, .resize-handle, style { display: none !important; }
+          .no-print { display: none !important; }
+          svg { break-inside: avoid; page-break-inside: avoid; }
         }
     </style>`;
 
@@ -760,6 +764,22 @@ const App = {
       // 外部画像タグを除去（via.placeholder.com 等、AIが誤挿入する場合の安全策）
       .replace(/<img\s+[^>]*src\s*=\s*["']https?:\/\/[^"']+["'][^>]*\/?>/gi, '<!-- 外部画像は非対応のため除去 -->')
       .trim();
+  },
+
+
+  /**
+   * innerHTML で挿入された <script> タグを実行する。
+   * ブラウザは innerHTML 経由の script を自動実行しないため、
+   * script 要素を再作成して差し替えることで実行させる。
+   * @param {HTMLElement} container - script を含むコンテナ要素
+   */
+  activateWorksheetScripts: (container) => {
+    var scripts = container.querySelectorAll('script');
+    scripts.forEach(function(oldScript) {
+      var newScript = document.createElement('script');
+      newScript.text = oldScript.text;
+      oldScript.parentNode.replaceChild(newScript, oldScript);
+    });
   },
 
 

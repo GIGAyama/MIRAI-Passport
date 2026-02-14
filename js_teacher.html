@@ -589,77 +589,99 @@ Object.assign(App, {
    */
   buildWsPrompt: () => {
     var info        = State.unitData ? (State.unitData.unitInfo || {}) : { grade: "", unitName: "" };
-    var description = State.currentTask.description || "";
+    var grade       = info.grade || '';
+    var unitName    = info.unitName || '';
+    var title       = State.currentTask.title || '';
+    var description = State.currentTask.description || '';
 
     // OCR テキストがあれば追加コンテキストとして挿入
-    var extraContext = "";
+    var ocrSection = '';
     if (State.ocrCache) {
-      extraContext = '\n【参考資料テキスト】\n' + State.ocrCache.substring(0, 1500)
-        + '...\n※この資料の内容を授業に反映させてください。';
+      ocrSection = '\n【参考資料テキスト】\n' + State.ocrCache.substring(0, 1500)
+        + '\n※この資料の内容を授業に反映させてください。\n';
     }
 
-    return 'あなたは日本の小学校教師です。以下の授業情報から、児童が自立的に取り組むためのワークシートHTMLを作成してください。\n\n'
+    // サーバー側 buildWorksheetPrompt() と同等の統一プロンプト（手動AI用）
+    return 'あなたは「教育工学」と「クリエイティブ・コーディング」に精通したフルスタックエンジニアです。\n'
+      + '日本の小学校の授業で使う、高品質なワークシートのHTMLを生成してください。\n\n'
+
       + '【授業情報】\n'
-      + '学年: ' + (info.grade || '') + '\n'
-      + '単元名: ' + (info.unitName || '') + '\n'
-      + '授業タイトル: ' + State.currentTask.title + '\n'
+      + '学年: ' + grade + '\n'
+      + '単元名: ' + unitName + '\n'
+      + '授業タイトル: ' + title + '\n'
       + '活動内容: ' + description + '\n'
-      + extraContext + '\n\n'
-      + '【出力HTMLの構成（厳守）】\n'
-      + '以下の構造を使用し、AIコーチング要素（ヒント、めあて）を盛り込んでください。\n'
-      + 'Markdown記法は禁止です。\n\n'
-      + '【重要な制約】\n'
-      + '- 外部画像URL（img src="https://..."）は絶対に使用禁止です。via.placeholder.com 等の外部サービスも禁止です。\n'
-      + '- 図形・図表が必要な場合は、HTML/CSSのみで描画してください（div + border, SVGインライン, CSS shapes, tableなど）。\n'
-      + '- 例: 三角形 → <div style="width:0;height:0;border-left:40px solid transparent;border-right:40px solid transparent;border-bottom:60px solid #333;"></div>\n'
-      + '- 例: 円 → <div style="width:80px;height:80px;border-radius:50%;border:2px solid #333;"></div>\n'
-      + '- 例: 方眼・表 → <table> を使用\n\n'
-      // ヘッダー部分のテンプレート
-      + '<!-- 1. ヘッダー -->\n'
-      + '<div class="ws-header" style="display:flex; justify-content:space-between; align-items:end; border-bottom: 3px double #555; padding-bottom: 10px; margin-bottom: 20px; font-family: \'Zen Maru Gothic\', sans-serif;">\n'
-      + '   <div><span style="background:#333; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.7em; margin-right:5px;">' + (info.grade || '') + '</span>'
-      + '<span style="font-weight:bold;">' + (info.unitName || '') + '</span></div>\n'
-      + '   <div style="text-align:right;">年 組 名前 __________________</div>\n'
-      + '</div>\n\n'
-      // タイトル & めあて
-      + '<!-- 2. タイトル & めあて -->\n'
-      + '<h1 style="text-align:center; font-size:1.8em; margin-bottom:20px;">' + State.currentTask.title + '</h1>\n'
-      + '<div style="background:#e3f2fd; padding:10px; border-radius:8px; margin-bottom:20px; border-left:5px solid #2196f3;">\n'
-      + '   <strong>今日のめあて:</strong> (活動内容から子供向けのめあてを生成)\n'
-      + '</div>\n\n'
-      // AIヒント
-      + '<!-- 3. AIヒント (Coaching) -->\n'
-      + '<div style="background:#fff3e0; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.9em; color:#e65100;">\n'
-      + '   <strong><i class="bi bi-lightbulb-fill"></i> AIコーチのヒント:</strong>\n'
-      + '   (この活動でつまずきやすい点や、考えるためのヒントを1-2行で記述)\n'
-      + '</div>\n\n'
-      // 本文エリア
-      + '<!-- 4. 本文エリア -->\n'
-      + '<!-- 児童が入力する記述欄には必ず class="ws-answer" を付けてください。 -->\n'
-      + '<!-- 問題文・指示文は通常のdiv/pで記述し、ws-answer は付けないでください。 -->\n'
-      + '<div style="min-height: 350px;">\n'
-      + '  (学習課題・問い・記述欄を生成。\n'
-      + '   問題文: 通常の div や p で記述\n'
-      + '   入力欄: <div class="ws-answer" style="border:1px solid #aaa; border-radius:6px; padding:10px; min-height:3em; margin:8px 0; background:#fffde7;"></div>\n'
-      + '   罫線付き入力欄: <div class="ws-answer ws-lines" style="min-height:4em; background-image:linear-gradient(#ccc 1px, transparent 1px); background-size:100% 1.5em; padding:4px 8px;"></div>\n'
-      + '   各設問ごとに ws-answer の入力欄を設けてください)\n'
-      + '</div>\n\n'
-      // フッター
-      + '<!-- 5. フッター -->\n'
-      + '<div style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 15px; display: flex; gap: 15px;">\n'
-      + '  <div style="flex: 6;">\n'
-      + '    <div style="font-weight:bold; font-size:0.9em;">■ ふりかえり</div>\n'
-      + '    <div class="ws-answer ws-lines" style="height: 4.5em; background-image: linear-gradient(#ccc 1px, transparent 1px); background-size: 100% 1.5em;"></div>\n'
-      + '  </div>\n'
-      + '  <div style="flex: 4;">\n'
-      + '    <div style="font-weight:bold; font-size:0.9em;">■ 自己評価</div>\n'
-      + '    <table class="table table-bordered table-sm mb-0" style="font-size: 0.85em; text-align:center;">\n'
-      + '      <tr><td class="bg-light" style="width:40%;">わかった</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
-      + '      <tr><td class="bg-light">考えた</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
-      + '      <tr><td class="bg-light">進んで</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + ocrSection + '\n'
+
+      + '【出力形式の制約（厳守）】\n'
+      + '- HTMLの body 内部のみを出力すること。<!DOCTYPE>, <html>, <head>, <body> タグは不要。\n'
+      + '- Markdown記法は禁止。```html ブロックで囲まないこと。\n'
+      + '- 外部リソース（img src="https://...", CDN, 外部ライブラリ）は一切使用禁止。\n'
+      + '- すべて標準API（HTML, CSS, インラインSVG, JavaScript）のみで完結させること。\n\n'
+
+      + '【HTMLレイアウト構造（この構造を厳守すること）】\n'
+      + '<div class="ws-sheet">\n'
+      + '  <div class="ws-header-fixed">\n'
+      + '    <div class="ws-header-left">\n'
+      + '      <span class="ws-unit-name">' + grade + ' ' + unitName + '</span>\n'
+      + '      <h1 class="ws-title">' + title + '</h1>\n'
+      + '    </div>\n'
+      + '    <table class="ws-meta-table">\n'
+      + '      <tr><td class="ws-meta-label">年</td><td class="ws-meta-input"></td>\n'
+      + '          <td class="ws-meta-label">組</td><td class="ws-meta-input"></td>\n'
+      + '          <td class="ws-meta-label">名前</td><td class="ws-meta-input" style="min-width:120px;"></td></tr>\n'
       + '    </table>\n'
       + '  </div>\n'
-      + '</div>';
+      + '  <div class="ws-content">\n'
+      + '    <!-- めあて・AIヒント・問題・解答欄を生成 -->\n'
+      + '  </div>\n'
+      + '  <div class="ws-footer-fixed">\n'
+      + '    <div class="ws-assessment-grid">\n'
+      + '      <div class="ws-reflection-box">\n'
+      + '        <span class="ws-reflection-title">ふりかえり</span>\n'
+      + '        <div class="ws-box ws-lines" style="height:4.5em; background-image:linear-gradient(#ccc 1px, transparent 1px); background-size:100% 1.5em;"></div>\n'
+      + '      </div>\n'
+      + '      <div>\n'
+      + '        <table class="table table-bordered table-sm mb-0" style="font-size:0.85em; text-align:center;">\n'
+      + '          <tr><td class="bg-light" style="width:40%;">わかった</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + '          <tr><td class="bg-light">考えた</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + '          <tr><td class="bg-light">進んで取り組んだ</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+      + '        </table>\n'
+      + '      </div>\n'
+      + '    </div>\n'
+      + '  </div>\n'
+      + '</div>\n\n'
+
+      + '【ws-content 内に含めるセクション】\n'
+      + '1. 今日のめあて: 背景 #e3f2fd, 左ボーダー #2196f3, border-radius:8px のボックス。\n'
+      + '2. AIコーチのヒント: 背景 #fff3e0, 左ボーダー #ff9800, border-radius:8px。\n'
+      + '3. 学習課題・問題: 問題文は通常の div/p で記述（ws-box を付けない）。\n'
+      + '4. 記述欄・解答欄: 児童が書き込む欄には class="ws-box" を付ける。罫線付きは class="ws-box ws-lines"。\n\n'
+
+      + '【利用可能なCSSクラス一覧】\n'
+      + 'レイアウト: ws-sheet(flex column), ws-header-fixed, ws-header-left, ws-content(flex:1), ws-footer-fixed\n'
+      + '記述欄: ws-box(リサイズ可能), ws-lines(罫線付き), ws-instruction(指示文)\n'
+      + '評価: ws-assessment-grid, ws-reflection-box, eval-btn(◎○△ボタン)\n'
+      + '教科別: grid-paper(方眼紙), graph-paper(グラフ用紙), math-grid/math-cell/math-line(算数マス目), mode-kokugo(国語縦書き)\n'
+      + 'Bootstrap 5: p-3, mb-3, bg-light, table, table-bordered, card, badge 等\n\n'
+
+      + '【図・グラフの描画技術】\n'
+      + 'テーマに応じて最適な描画技術を選択し、視覚的に美しい図版を積極的に生成すること:\n'
+      + '- インラインSVG（推奨）: グラフ、座標平面、図形、フローチャート、イラスト。\n'
+      + '- CSS Art: 単純な図形、実験器具のアイコン。\n'
+      + '- HTML table: 表、比較表。\n\n'
+
+      + '【動的ワークシート（JavaScript使用時のルール）】\n'
+      + '練習問題の生成やインタラクティブ教材が必要な場合:\n'
+      + '- SeededRandom クラスを実装し、同じシード値で同じ結果を保証。\n'
+      + '- コントロールパネルは <div class="no-print"> で囲む。\n'
+      + '- <script>タグ内にJSを記述し、即時実行関数 (function(){...})() で囲む。\n\n'
+
+      + '【印刷への配慮】\n'
+      + 'コントロールパネルには class="no-print" を付け、印刷時に非表示にする。\n'
+      + 'A4用紙（210mm×297mm）に収まるサイズを意識する。\n\n'
+
+      + '【美学】\n'
+      + '視覚的な美しさ（線の滑らかさ、色の調和、余白のバランス）を意識し、小学生が親しみやすいデザインにしてください。';
   },
 
   /**
@@ -862,15 +884,24 @@ Object.assign(App, {
 
     UI.showLoading("AIが執筆中です", "レイアウトを構成しています...");
     try {
-      // 共通のプロンプト構築処理を呼び出し
-      var prompt = App.buildWsPrompt();
+      var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
 
-      // --- AIに送信してHTML生成 ---
-      var html = await Server.call('callGeminiAPI', prompt);
-      html = App.cleanAIOutput(html);
+      // OCR参考資料（useOcr=true かつキャッシュがある場合のみ）
+      var ocrContext = '';
+      if (useOcr && State.ocrCache) {
+        ocrContext = State.ocrCache.substring(0, 1500);
+      }
+
+      // --- サーバー側の統一プロンプトでAI生成（一括生成と同じ関数を使用） ---
+      var html = await Server.call('generateSingleWorksheet', {
+        grade:       info.grade || '',
+        unitName:    info.unitName || '',
+        stepTitle:   State.currentTask.title,
+        description: State.currentTask.description || '',
+        ocrContext:  ocrContext
+      });
 
       // --- 生成結果をサーバーに保存 ---
-      var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
       await Server.call('saveWorksheetToDB', {
         taskId:      State.currentTask.id,
         unitName:    info.unitName || '',
@@ -948,9 +979,11 @@ Object.assign(App, {
         );
 
         try {
-          // サーバーサイドの generateSingleWorksheet（AIコーチング版）を使用
+          // サーバーサイドの統一プロンプトでAI生成
+          var info = State.unitData ? (State.unitData.unitInfo || {}) : {};
           var html = await Server.call('generateSingleWorksheet', {
-            unitName:    task.unitName || (State.unitData ? (State.unitData.unitInfo || {}).unitName : "単元"),
+            grade:       info.grade || '',
+            unitName:    task.unitName || info.unitName || '単元',
             stepTitle:   task.title,
             description: task.description
           });

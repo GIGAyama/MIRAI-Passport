@@ -959,33 +959,192 @@ function callGeminiAPI(prompt) {
 }
 
 /**
- * AIコーチング対応のワークシートHTMLを生成する。
- * 一括生成時にサーバーサイドから呼ばれる。
+ * 統一ワークシート生成プロンプトを構築する。
+ * 個別生成・一括生成の両方で同じプロンプトを使用する。
  *
  * @param {Object} data - 生成に必要な情報
- * @param {string} data.unitName    - 単元名
- * @param {string} data.stepTitle   - 活動タイトル
- * @param {string} data.description - 活動内容の説明
- * @return {string} 生成されたHTML文字列
+ * @param {string} [data.grade]       - 学年（例: "小学5年"）
+ * @param {string}  data.unitName     - 単元名
+ * @param {string}  data.stepTitle    - 授業タイトル
+ * @param {string}  data.description  - 活動内容の説明
+ * @param {string} [data.ocrContext]  - OCR読み取りテキスト（参考資料）
+ * @return {string} Gemini APIに送信するプロンプト文字列
+ */
+function buildWorksheetPrompt(data) {
+  var grade       = data.grade       || '';
+  var unitName    = data.unitName    || '';
+  var stepTitle   = data.stepTitle   || '';
+  var description = data.description || '';
+  var ocrContext  = data.ocrContext  || '';
+
+  var ocrSection = '';
+  if (ocrContext) {
+    ocrSection = '\n【参考資料テキスト】\n' + ocrContext + '\n※この資料の内容を授業に反映させてください。\n';
+  }
+
+  return 'あなたは「教育工学」と「クリエイティブ・コーディング」に精通したフルスタックエンジニアです。\n'
+    + '日本の小学校の授業で使う、高品質なワークシートのHTMLを生成してください。\n\n'
+
+    // ── 授業情報 ──
+    + '【授業情報】\n'
+    + '学年: ' + grade + '\n'
+    + '単元名: ' + unitName + '\n'
+    + '授業タイトル: ' + stepTitle + '\n'
+    + '活動内容: ' + description + '\n'
+    + ocrSection + '\n'
+
+    // ── 出力形式の制約 ──
+    + '【出力形式の制約（厳守）】\n'
+    + '- HTMLの body 内部のみを出力すること。<!DOCTYPE>, <html>, <head>, <body> タグは不要。\n'
+    + '- Markdown記法は禁止。```html ブロックで囲まないこと。\n'
+    + '- 外部リソース（img src="https://...", CDN, 外部ライブラリ）は一切使用禁止。\n'
+    + '- すべて標準API（HTML, CSS, インラインSVG, JavaScript）のみで完結させること。\n'
+    + '- via.placeholder.com 等の外部画像サービスも禁止。\n\n'
+
+    // ── HTMLレイアウト構造 ──
+    + '【HTMLレイアウト構造（この構造を厳守すること）】\n'
+    + '<div class="ws-sheet">\n'
+    + '  <!-- ヘッダー -->\n'
+    + '  <div class="ws-header-fixed">\n'
+    + '    <div class="ws-header-left">\n'
+    + '      <span class="ws-unit-name">' + grade + ' ' + unitName + '</span>\n'
+    + '      <h1 class="ws-title">' + stepTitle + '</h1>\n'
+    + '    </div>\n'
+    + '    <table class="ws-meta-table">\n'
+    + '      <tr><td class="ws-meta-label">年</td><td class="ws-meta-input"></td>\n'
+    + '          <td class="ws-meta-label">組</td><td class="ws-meta-input"></td>\n'
+    + '          <td class="ws-meta-label">名前</td><td class="ws-meta-input" style="min-width:120px;"></td></tr>\n'
+    + '    </table>\n'
+    + '  </div>\n\n'
+    + '  <!-- 本文コンテンツ -->\n'
+    + '  <div class="ws-content">\n'
+    + '    <!-- ここに、めあて・AIヒント・問題・解答欄を生成 -->\n'
+    + '  </div>\n\n'
+    + '  <!-- フッター -->\n'
+    + '  <div class="ws-footer-fixed">\n'
+    + '    <div class="ws-assessment-grid">\n'
+    + '      <div class="ws-reflection-box">\n'
+    + '        <span class="ws-reflection-title">ふりかえり</span>\n'
+    + '        <div class="ws-box ws-lines" style="height:4.5em; background-image:linear-gradient(#ccc 1px, transparent 1px); background-size:100% 1.5em;"></div>\n'
+    + '      </div>\n'
+    + '      <div>\n'
+    + '        <table class="table table-bordered table-sm mb-0" style="font-size:0.85em; text-align:center;">\n'
+    + '          <tr><td class="bg-light" style="width:40%;">わかった</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+    + '          <tr><td class="bg-light">考えた</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+    + '          <tr><td class="bg-light">進んで取り組んだ</td><td><button type="button" class="eval-btn" data-value="△">△</button><button type="button" class="eval-btn" data-value="◯">◯</button><button type="button" class="eval-btn" data-value="◎">◎</button></td></tr>\n'
+    + '        </table>\n'
+    + '      </div>\n'
+    + '    </div>\n'
+    + '  </div>\n'
+    + '</div>\n\n'
+
+    // ── ws-content 内のセクション指示 ──
+    + '【ws-content 内に含めるセクション】\n'
+    + '1. 今日のめあて: 背景 #e3f2fd, 左ボーダー #2196f3, border-radius:8px のボックス。活動内容から子供向けのめあてを生成。\n'
+    + '2. AIコーチのヒント: 背景 #fff3e0, 左ボーダー #ff9800, border-radius:8px。つまずきやすい点や考えるコツを1-2行で。\n'
+    + '3. 学習課題・問題: 問題文は通常の div/p で記述（ws-box を付けない）。\n'
+    + '4. 記述欄・解答欄: 児童が書き込む欄には class="ws-box" を付ける。罫線付きは class="ws-box ws-lines" + background-image で罫線を描画。\n\n'
+
+    // ── 利用可能なCSSクラス ──
+    + '【利用可能なCSSクラス一覧】\n'
+    + 'レイアウト: ws-sheet(flex column), ws-header-fixed, ws-header-left, ws-content(flex:1), ws-footer-fixed(margin-top:auto)\n'
+    + 'テキスト: ws-title(1.3rem bold), ws-unit-name(badge風), ws-date-small(0.75rem)\n'
+    + 'メタ情報: ws-meta-table, ws-meta-label(背景#eee), ws-meta-input(入力欄)\n'
+    + '記述欄: ws-box(リサイズ可能な入力ボックス), ws-lines(罫線付き), ws-instruction(指示文ボックス)\n'
+    + '評価: ws-assessment-grid(grid 2fr 1fr), ws-reflection-box, ws-reflection-title, eval-btn(◎○△ボタン)\n'
+    + '教科別: grid-paper(方眼紙40px), graph-paper(グラフ用紙20px), math-grid/math-cell/math-line(算数マス目), mode-kokugo(国語縦書き)\n'
+    + 'Bootstrap 5: p-3, mb-3, bg-light, table, table-bordered, card, badge 等のユーティリティクラスも使用可\n\n'
+
+    // ── SVG描画の指示 ──
+    + '【図・グラフの描画技術】\n'
+    + 'テーマに応じて最適な描画技術を選択し、視覚的に美しい図版を積極的に生成すること:\n'
+    + '- インラインSVG（推奨）: グラフ（棒・折れ線・円）、座標平面、地図、図形、フローチャート、イラスト。viewBox で A4幅に収まるサイズに。\n'
+    + '- CSS Art: 単純な図形（円、三角形、矢印）、実験器具のアイコン。\n'
+    + '  例: <div style="width:80px;height:80px;border-radius:50%;border:2px solid #333;"></div>\n'
+    + '- HTML table: 表、時間割、比較表。\n'
+    + '- 再帰/フラクタル: 自然物（木、雪の結晶）の描画にはSVG + JavaScript。\n'
+    + '- 数式/三角関数: 周期的な動き、波形、天体の軌道はSVG path + Math.sin/cos。\n\n'
+    + 'SVGの具体例（棒グラフ）:\n'
+    + '<svg viewBox="0 0 300 200" style="width:100%;max-width:400px;" xmlns="http://www.w3.org/2000/svg">\n'
+    + '  <rect x="30" y="20" width="40" height="150" fill="#4CAF50" rx="4"/>\n'
+    + '  <rect x="90" y="60" width="40" height="110" fill="#2196F3" rx="4"/>\n'
+    + '  <rect x="150" y="100" width="40" height="70" fill="#FF9800" rx="4"/>\n'
+    + '  <line x1="20" y1="170" x2="280" y2="170" stroke="#333" stroke-width="2"/>\n'
+    + '  <text x="50" y="190" text-anchor="middle" font-size="12">A</text>\n'
+    + '  <text x="110" y="190" text-anchor="middle" font-size="12">B</text>\n'
+    + '  <text x="170" y="190" text-anchor="middle" font-size="12">C</text>\n'
+    + '</svg>\n\n'
+
+    // ── 動的ワークシート ──
+    + '【動的ワークシート（JavaScript使用時のルール）】\n'
+    + '算数の練習問題を無限生成、理科のシミュレーション、インタラクティブ教材などが必要な場合:\n'
+    + '- 以下の SeededRandom クラスを必ず実装し、同じシード値で同じ問題・図版が生成されるようにする。\n'
+    + '- draw() 関数で描画・問題生成ロジックを記述。\n'
+    + '- コントロールパネル（シード値、難易度、問題数等）を <div class="no-print"> で囲み、印刷時は非表示にする。\n'
+    + '- <script>タグ内にすべてのJSを記述。即時実行関数 (function(){...})() で囲むこと。\n\n'
+    + 'SeededRandom クラス:\n'
+    + '<script>\n'
+    + '(function() {\n'
+    + '  class SeededRandom {\n'
+    + '    constructor(seed) {\n'
+    + '      this.x=123456789; this.y=362436069; this.z=521288629; this.w=seed;\n'
+    + '    }\n'
+    + '    next() {\n'
+    + '      let t=this.x^(this.x<<11);\n'
+    + '      this.x=this.y; this.y=this.z; this.z=this.w;\n'
+    + '      this.w=(this.w^(this.w>>>19))^(t^(t>>>8));\n'
+    + '      return (this.w>>>0)/4294967296;\n'
+    + '    }\n'
+    + '    range(min,max) { return this.next()*(max-min)+min; }\n'
+    + '    randInt(min,max) { return Math.floor(this.range(min,max+1)); }\n'
+    + '  }\n'
+    + '  function draw() {\n'
+    + '    const seed = parseInt(document.getElementById("wsSeed").value) || 1;\n'
+    + '    const rng = new SeededRandom(seed);\n'
+    + '    // ... 問題生成ロジック ...\n'
+    + '  }\n'
+    + '  draw();\n'
+    + '  document.getElementById("wsSeed").addEventListener("change", draw);\n'
+    + '})();\n'
+    + '</script>\n\n'
+
+    // ── 印刷への配慮 ──
+    + '【印刷への配慮】\n'
+    + '- コントロールパネルには class="no-print" を付け、印刷時に非表示にする。\n'
+    + '- SVGは印刷時にも正しく表示される。\n'
+    + '- A4用紙（210mm×297mm）に収まるサイズを意識し、余白を適切にとる。\n'
+    + '- 図版が大きすぎないよう max-width を設定する。\n\n'
+
+    // ── 美学 ──
+    + '【美学】\n'
+    + '教育用であっても視覚的な美しさ（線の滑らかさ、色の調和、余白のバランス）を意識してください。\n'
+    + '小学生が親しみやすく、学習意欲が高まるデザインにしてください。\n';
+}
+
+/**
+ * 統一プロンプトを使ってワークシートHTMLを生成する。
+ * 個別生成・一括生成の両方からこの関数が呼ばれる。
+ *
+ * @param {Object} data - 生成に必要な情報
+ * @param {string} [data.grade]       - 学年
+ * @param {string}  data.unitName     - 単元名
+ * @param {string}  data.stepTitle    - 活動タイトル
+ * @param {string}  data.description  - 活動内容の説明
+ * @param {string} [data.ocrContext]  - OCR読み取りテキスト
+ * @return {string} 生成されたHTML文字列（クリーニング済み）
  */
 function generateSingleWorksheet(data) {
-  var prompt = 'あなたは教育工学と個別最適な学びの専門家です。\n'
-    + '児童が自立的に学習を進められるよう、以下の活動内容に基づいた「AIコーチング機能付きHTMLワークシート」の本文を作成してください。\n\n'
-    + '【活動内容】\n'
-    + '単元: ' + data.unitName + '\n'
-    + '活動: ' + data.stepTitle + '\n'
-    + '内容: ' + data.description + '\n\n'
-    + '【デザインの要件】\n'
-    + '1. 小学生が親しみやすい言葉遣い。\n'
-    + '2. 以下のセクションを必ず含める：\n'
-    + '   - 「今日のめあて」（活動内容から具体化）\n'
-    + '   - 「AIヒント・ポイント」（この活動でつまずきやすい点や、考えるコツをAIコーチとして助言）\n'
-    + '   - 「考えを書くスペース」（<div class="ws-answer" style="border:1px solid #aaa; border-radius:6px; padding:10px; min-height:3em; background:#fffde7;"></div> を使用。問題文には ws-answer を付けないこと）\n'
-    + '   - 「自己評価」（3段階のスタンプ選択など）\n'
-    + '3. スタイルはBootstrap 5のクラス（card, p-3, mb-3, bg-lightなど）を活用。\n'
-    + '4. HTMLの「body内部」のみを出力すること。余計な解説や```htmlタグは不要。';
+  var prompt = buildWorksheetPrompt(data);
+  var result = callGeminiAPI(prompt);
 
-  return callGeminiAPI(prompt);
+  // AIレスポンスのクリーニング（cleanAIOutput相当）
+  result = result
+    .replace(/```html/gi, '').replace(/```/g, '')
+    .replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '')
+    .replace(/<img\s+[^>]*src\s*=\s*["']https?:\/\/[^"']+["'][^>]*\/?>/gi, '')
+    .trim();
+
+  return result;
 }
 
 /**
