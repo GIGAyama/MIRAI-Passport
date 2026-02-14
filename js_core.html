@@ -632,12 +632,12 @@ const App = {
     styleElement.id = 'print-preview-style';
     styleElement.textContent = `
       .print-sheet {
-        width: 210mm;
-        min-height: 297mm;
+        width: 190mm;
+        min-height: 277mm;
         position: relative;
         box-sizing: border-box;
-        padding: 15mm;
-        margin-bottom: 20px;
+        padding: 10mm;
+        margin: 0 auto 20px auto;
         font-family: "Zen Maru Gothic", sans-serif; /* Ensure font is applied for preview */
       }
       .print-overlay {
@@ -682,17 +682,17 @@ const App = {
     const printCss = `<style>
         body { margin: 0; padding: 0; font-family: "Zen Maru Gothic", sans-serif; }
         @media print {
-          @page { margin: 0; size: A4; }
+          @page { margin: 10mm; size: A4; }
           /* メインページの @media print { body * { visibility: hidden } } を上書き */
           body, body * { visibility: visible !important; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0;}
           .print-sheet {
-            width: 210mm;
-            min-height: 296mm;
+            width: 100%;
+            min-height: 277mm;
             position: relative;
             box-sizing: border-box;
-            margin: 0;
-            padding: 15mm;
+            margin: 0 auto;
+            padding: 5mm;
           }
           .print-overlay {
             position: absolute;

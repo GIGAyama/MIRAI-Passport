@@ -670,12 +670,6 @@ Object.assign(App, {
       + '- CSS Art: 単純な図形、実験器具のアイコン。\n'
       + '- HTML table: 表、比較表。\n\n'
 
-      + '【動的ワークシート（JavaScript使用時のルール）】\n'
-      + '練習問題の生成やインタラクティブ教材が必要な場合:\n'
-      + '- SeededRandom クラスを実装し、同じシード値で同じ結果を保証。\n'
-      + '- コントロールパネルは <div class="no-print"> で囲む。\n'
-      + '- <script>タグ内にJSを記述し、即時実行関数 (function(){...})() で囲む。\n\n'
-
       + '【印刷への配慮】\n'
       + 'コントロールパネルには class="no-print" を付け、印刷時に非表示にする。\n'
       + 'A4用紙（210mm×297mm）に収まるサイズを意識する。\n\n'
@@ -1724,6 +1718,174 @@ Object.assign(App, {
     } catch (e) {
       console.error(e);
       Swal.fire('エラー', '保存に失敗しました', 'error');
+    }
+  },
+
+  // ==========================================================
+  //  AIコメント一括生成・返却
+  // ==========================================================
+
+  /**
+   * AIコメント一括生成ボタンのハンドラ。
+   * フィルタで選択中の授業の全提出物に対してAIコメントを生成し、
+   * レビューモーダルを開く。
+   */
+  dbGenerateAIComments: async () => {
+    var taskFilter = document.getElementById('dbFilterTask').value;
+    if (taskFilter === '__all__') {
+      Swal.fire('授業を選択してください', 'フィルタから特定の授業を選択してから、AIコメント生成を実行してください。', 'warning');
+      return;
+    }
+
+    UI.showLoading('AIコメント生成中...', '提出物を分析しています');
+    try {
+      var result = await Server.call('generateBatchComments', taskFilter);
+
+      if (!result || !result.comments || result.comments.length === 0) {
+        Swal.fire('提出物なし', 'この授業には提出済みのワークシートがありません。', 'info');
+        return;
+      }
+
+      App._dbShowCommentReview(result.comments, result.taskTitle);
+    } catch (e) {
+      console.error(e);
+      Swal.fire('エラー', 'AIコメントの生成に失敗しました。', 'error');
+    } finally {
+      UI.hideLoading();
+    }
+  },
+
+  /**
+   * AIコメントレビューモーダルを構築して表示する（内部処理）。
+   * @param {Object[]} comments - [{rowIndex, studentName, textContent, status, aiComment}, ...]
+   * @param {string} taskTitle - 授業タイトル
+   */
+  _dbShowCommentReview: (comments, taskTitle) => {
+    // モーダルの授業情報を設定
+    var infoEl = document.getElementById('batchCommentInfo');
+    infoEl.textContent = '授業: ' + (taskTitle || '') + ' (' + comments.length + '件の提出)';
+
+    // テーブルボディを構築
+    var tbody = document.getElementById('batchCommentBody');
+    tbody.innerHTML = '';
+
+    // コメントデータをモーダルに紐づけて保存
+    State._batchComments = comments;
+
+    comments.forEach(function(c, idx) {
+      var tr = document.createElement('tr');
+      var statusBadge = c.status === 'graded'
+        ? '<span class="badge bg-primary ms-1" style="font-size:0.65em;">添削済</span>'
+        : '';
+      var checked = c.aiComment ? 'checked' : '';
+
+      tr.innerHTML =
+        '<td class="text-center align-middle"><input type="checkbox" class="batch-cb" data-idx="' + idx + '" ' + checked + ' onchange="App._dbUpdateBatchCount()"></td>'
+        + '<td class="align-middle fw-bold">' + (c.studentName || '名無し') + statusBadge + '</td>'
+        + '<td class="align-middle small text-muted">' + (c.textContent || '<em>未記入</em>') + '</td>'
+        + '<td><textarea class="form-control form-control-sm batch-comment" data-idx="' + idx + '" rows="2" style="font-size:0.85em;">'
+        + (c.aiComment || '') + '</textarea></td>';
+
+      tbody.appendChild(tr);
+    });
+
+    // 全選択チェックボックスを同期
+    document.getElementById('batchSelectAll').checked = true;
+    App._dbUpdateBatchCount();
+
+    // モーダル表示
+    var modal = new bootstrap.Modal(document.getElementById('batchCommentModal'));
+    modal.show();
+  },
+
+  /** 全選択/全解除の切り替え */
+  _dbToggleAllComments: (checked) => {
+    document.querySelectorAll('.batch-cb').forEach(function(cb) {
+      cb.checked = checked;
+    });
+    App._dbUpdateBatchCount();
+  },
+
+  /** 選択件数の更新 */
+  _dbUpdateBatchCount: () => {
+    var checked = document.querySelectorAll('.batch-cb:checked').length;
+    var total   = document.querySelectorAll('.batch-cb').length;
+    document.getElementById('batchSelectedCount').textContent = checked + ' / ' + total + ' 件選択中';
+  },
+
+  /**
+   * 選択したコメントを一括返却する。
+   * チェックされた提出物のコメントをサーバーに送信し、ステータスを「添削済」に更新する。
+   */
+  dbBatchReturn: async () => {
+    var comments = State._batchComments;
+    if (!comments) return;
+
+    // チェック済みのコメントを収集
+    var feedbacks = [];
+    document.querySelectorAll('.batch-cb:checked').forEach(function(cb) {
+      var idx = parseInt(cb.dataset.idx);
+      var textarea = document.querySelector('.batch-comment[data-idx="' + idx + '"]');
+      var text = textarea ? textarea.value.trim() : '';
+      if (text && comments[idx]) {
+        feedbacks.push({
+          rowIndex:     comments[idx].rowIndex,
+          feedbackText: text
+        });
+      }
+    });
+
+    if (feedbacks.length === 0) {
+      Swal.fire('対象なし', 'コメントが入力されている提出物を選択してください。', 'warning');
+      return;
+    }
+
+    var confirm = await Swal.fire({
+      title: feedbacks.length + '件のコメントを返却しますか？',
+      text: '返却後、児童にコメントが表示されます。',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: '返却する',
+      cancelButtonText: 'キャンセル'
+    });
+    if (!confirm.isConfirmed) return;
+
+    UI.showLoading('返却中...', feedbacks.length + '件のコメントを保存しています');
+    try {
+      await Server.call('batchSaveFeedback', feedbacks);
+
+      // キャッシュを更新
+      if (State._db) {
+        feedbacks.forEach(function(fb) {
+          // allSubmissions 内の対象行を更新
+          for (var i = 0; i < State._db.allSubmissions.length; i++) {
+            if (State._db.allSubmissions[i].rowIndex === fb.rowIndex) {
+              State._db.allSubmissions[i].status = 'graded';
+              State._db.allSubmissions[i].feedbackText = fb.feedbackText;
+              break;
+            }
+          }
+        });
+        // グリッド再描画
+        App.dbApplyFilter();
+      }
+
+      // モーダルを閉じる
+      var modal = bootstrap.Modal.getInstance(document.getElementById('batchCommentModal'));
+      if (modal) modal.hide();
+
+      Swal.fire({
+        title: '返却完了',
+        text: feedbacks.length + '件のコメントを返却しました。',
+        icon: 'success',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } catch (e) {
+      console.error(e);
+      Swal.fire('エラー', '返却に失敗しました。', 'error');
+    } finally {
+      UI.hideLoading();
     }
   },
 

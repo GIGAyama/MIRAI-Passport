@@ -804,6 +804,139 @@ function saveFeedback(data) {
 }
 
 /**
+ * 指定タスクの全提出物に対してAIコメントを一括生成する。
+ * 教師ダッシュボードで使用。コメントは返却前のたたき台として返す。
+ *
+ * @param {string} taskId - 対象タスクID
+ * @return {Object} { comments: [{rowIndex, studentName, textContent, aiComment}, ...], taskTitle: string }
+ */
+function generateBatchComments(taskId) {
+  var ss = getDbSpreadsheet();
+
+  // --- 授業情報を取得 ---
+  var wsSheet = ss.getSheetByName('Worksheets');
+  var unitName  = '';
+  var stepTitle = '';
+  var wsFound = wsSheet.getRange("A:A").createTextFinder(String(taskId)).matchEntireCell(true).findNext();
+  if (wsFound) {
+    var wsRow = wsSheet.getRange(wsFound.getRow(), 1, 1, 3).getValues()[0];
+    unitName  = String(wsRow[1] || '');
+    stepTitle = String(wsRow[2] || '');
+  }
+
+  // --- 提出物を取得（下書き除外） ---
+  var resSheet = ss.getSheetByName('Responses');
+  var allData  = resSheet.getDataRange().getValues();
+  var submissions = [];
+
+  for (var i = 1; i < allData.length; i++) {
+    var row = allData[i];
+    if (String(row[RS_COL_TASK_ID - 1]) !== String(taskId)) continue;
+    if (row[RS_COL_STATUS - 1] === 'draft') continue;
+
+    submissions.push({
+      rowIndex:     i + 1,
+      studentName:  row[RS_COL_STUDENT_NAME - 1] || '名無し',
+      textContent:  row[RS_COL_TEXT_CONTENT - 1]  || '',
+      reflection:   row[RS_COL_REFLECTION - 1]    || '',
+      status:       row[RS_COL_STATUS - 1]         || ''
+    });
+  }
+
+  if (submissions.length === 0) {
+    return { comments: [], taskTitle: stepTitle };
+  }
+
+  // --- 児童一覧テキストを構築 ---
+  var studentLines = submissions.map(function(s, idx) {
+    var line = (idx + 1) + '. ' + s.studentName + ' | 自己評価: ' + (s.textContent || '未記入');
+    if (s.reflection) {
+      line += ' | ふりかえり: ' + s.reflection;
+    }
+    return line;
+  }).join('\n');
+
+  // --- AIプロンプト ---
+  var prompt = 'あなたは経験豊富なベテラン小学校教師です。\n'
+    + '以下の授業で提出された児童のワークシートに対して、一人ひとりに温かいコメントを書いてください。\n\n'
+    + '【授業情報】\n'
+    + '単元: ' + unitName + '\n'
+    + '授業: ' + stepTitle + '\n\n'
+    + '【コメントのルール】\n'
+    + '- 児童の自己評価やふりかえりの内容に基づいて、個別化されたコメントを書く\n'
+    + '- 学習の成果や成長を具体的に認め、児童が達成感を感じられるようにする\n'
+    + '- 次の授業に向けたアドバイスや励ましを含める\n'
+    + '- 「◎」の項目は大いに褒め、「△」の項目は改善のヒントを優しく伝える\n'
+    + '- 小学生が読んで嬉しくなる、親しみやすい言葉遣いにする\n'
+    + '- 各コメントは2〜4文（50〜120文字程度）で簡潔にまとめる\n'
+    + '- 自己評価が未記入の場合は、提出したこと自体を認めて励ます\n\n'
+    + '【児童の提出データ】\n'
+    + studentLines + '\n\n'
+    + '【出力形式（厳守）】\n'
+    + '以下のJSON配列のみを出力してください。説明文やMarkdownは不要です。\n'
+    + '[\n'
+    + '  {"index": 1, "comment": "コメント内容"},\n'
+    + '  {"index": 2, "comment": "コメント内容"},\n'
+    + '  ...\n'
+    + ']\n';
+
+  // --- AI呼び出し ---
+  var result = callGeminiAPI(prompt);
+
+  // --- JSONパース ---
+  var parsed = [];
+  try {
+    // AI出力からJSON配列を抽出
+    var jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[0]);
+    }
+  } catch (e) {
+    Logger.log('AI コメントのJSONパースに失敗: ' + e.message);
+  }
+
+  // --- 結果をマッピング ---
+  var comments = submissions.map(function(s, idx) {
+    var aiComment = '';
+    for (var j = 0; j < parsed.length; j++) {
+      if (parsed[j].index === idx + 1) {
+        aiComment = parsed[j].comment || '';
+        break;
+      }
+    }
+    return {
+      rowIndex:    s.rowIndex,
+      studentName: s.studentName,
+      textContent: s.textContent,
+      status:      s.status,
+      aiComment:   aiComment
+    };
+  });
+
+  return { comments: comments, taskTitle: stepTitle };
+}
+
+/**
+ * 複数の提出物に対してフィードバックを一括保存・返却する。
+ *
+ * @param {Object[]} feedbacks - [{rowIndex: number, feedbackText: string}, ...]
+ * @return {Object} { success: true, count: number }
+ */
+function batchSaveFeedback(feedbacks) {
+  var sheet = getDbSpreadsheet().getSheetByName('Responses');
+
+  for (var i = 0; i < feedbacks.length; i++) {
+    var fb = feedbacks[i];
+    if (fb.rowIndex && fb.feedbackText) {
+      sheet.getRange(fb.rowIndex, RS_COL_STATUS).setValue('graded');
+      sheet.getRange(fb.rowIndex, RS_COL_FEEDBACK_TXT).setValue(fb.feedbackText);
+    }
+  }
+
+  return { success: true, count: feedbacks.length };
+}
+
+/**
  * 広場（ギャラリー）に公開されている回答を取得する。
  * 児童の「みんなの広場」画面で、友達の作品を表示するのに使用する。
  *
@@ -1074,39 +1207,6 @@ function buildWorksheetPrompt(data) {
     + '  <text x="110" y="190" text-anchor="middle" font-size="12">B</text>\n'
     + '  <text x="170" y="190" text-anchor="middle" font-size="12">C</text>\n'
     + '</svg>\n\n'
-
-    // ── 動的ワークシート ──
-    + '【動的ワークシート（JavaScript使用時のルール）】\n'
-    + '算数の練習問題を無限生成、理科のシミュレーション、インタラクティブ教材などが必要な場合:\n'
-    + '- 以下の SeededRandom クラスを必ず実装し、同じシード値で同じ問題・図版が生成されるようにする。\n'
-    + '- draw() 関数で描画・問題生成ロジックを記述。\n'
-    + '- コントロールパネル（シード値、難易度、問題数等）を <div class="no-print"> で囲み、印刷時は非表示にする。\n'
-    + '- <script>タグ内にすべてのJSを記述。即時実行関数 (function(){...})() で囲むこと。\n\n'
-    + 'SeededRandom クラス:\n'
-    + '<script>\n'
-    + '(function() {\n'
-    + '  class SeededRandom {\n'
-    + '    constructor(seed) {\n'
-    + '      this.x=123456789; this.y=362436069; this.z=521288629; this.w=seed;\n'
-    + '    }\n'
-    + '    next() {\n'
-    + '      let t=this.x^(this.x<<11);\n'
-    + '      this.x=this.y; this.y=this.z; this.z=this.w;\n'
-    + '      this.w=(this.w^(this.w>>>19))^(t^(t>>>8));\n'
-    + '      return (this.w>>>0)/4294967296;\n'
-    + '    }\n'
-    + '    range(min,max) { return this.next()*(max-min)+min; }\n'
-    + '    randInt(min,max) { return Math.floor(this.range(min,max+1)); }\n'
-    + '  }\n'
-    + '  function draw() {\n'
-    + '    const seed = parseInt(document.getElementById("wsSeed").value) || 1;\n'
-    + '    const rng = new SeededRandom(seed);\n'
-    + '    // ... 問題生成ロジック ...\n'
-    + '  }\n'
-    + '  draw();\n'
-    + '  document.getElementById("wsSeed").addEventListener("change", draw);\n'
-    + '})();\n'
-    + '</script>\n\n'
 
     // ── 印刷への配慮 ──
     + '【印刷への配慮】\n'
