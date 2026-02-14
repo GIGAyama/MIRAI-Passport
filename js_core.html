@@ -681,16 +681,18 @@ const App = {
         body { margin: 0; padding: 0; font-family: "Zen Maru Gothic", sans-serif; }
         @media print {
           @page { margin: 0; size: A4; }
+          /* メインページの @media print { body * { visibility: hidden } } を上書き */
+          body, body * { visibility: visible !important; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0;}
           .print-sheet {
             width: 210mm;
-            height: 296mm; /* A bit less than 297mm to avoid issues, ~1mm shorter than A4 height */
+            height: 296mm;
             position: relative;
             box-sizing: border-box;
             margin: 0;
             padding: 15mm;
             page-break-after: always;
-            overflow: hidden; /* Ensure content doesn't spill outside print area */
+            overflow: hidden;
           }
           .print-sheet:last-child { page-break-after: auto; }
           .print-overlay {
@@ -702,9 +704,18 @@ const App = {
             pointer-events: none;
             z-index: 10;
           }
-          .ws-box, .ws-lines, table, tr, .ws-header, h1 { break-inside: avoid; }
-          /* Ensure buttons and controls are hidden in print */
-          .btn, button, style { display: none !important; }
+          /* ページまたぎでコンテンツが分断されないようにする */
+          .ws-box, .ws-lines, .ws-instruction,
+          .ws-header-fixed, .ws-footer-fixed,
+          .ws-assessment-grid, .ws-reflection-box,
+          .ws-rubric-table, .ws-meta-table,
+          .math-grid, .grid-paper, .graph-paper,
+          .resizable-image-container,
+          table, tr, h1, h2, h3 {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          .btn, button, .resize-handle, style { display: none !important; }
         }
     </style>`;
 
