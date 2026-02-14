@@ -349,7 +349,7 @@
         <!-- フィルター -->
         <div class="p-3">
           <label class="form-label small fw-bold mb-1">単元</label>
-          <select id="dbFilterUnit" class="form-select form-select-sm mb-3" onchange="App.dbApplyFilter()">
+          <select id="dbFilterUnit" class="form-select form-select-sm mb-3" onchange="App._dbUpdateTaskFilter(); App.dbApplyFilter()">
             <option value="__all__">すべての単元</option>
           </select>
 

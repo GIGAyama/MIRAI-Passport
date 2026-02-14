@@ -1469,9 +1469,6 @@ Object.assign(App, {
     var db = State._db;
     if (!db) return;
 
-    // 授業フィルターを単元に連動更新
-    App._dbUpdateTaskFilter();
-
     // --- フィルター値の取得 ---
     var unitFilter   = document.getElementById('dbFilterUnit').value;
     var taskFilter   = document.getElementById('dbFilterTask').value;
