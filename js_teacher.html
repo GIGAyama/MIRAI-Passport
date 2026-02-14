@@ -673,8 +673,10 @@ Object.assign(App, {
       + '【動的ワークシート（JavaScript使用時のルール）】\n'
       + '練習問題の生成やインタラクティブ教材が必要な場合:\n'
       + '- SeededRandom クラスを実装し、同じシード値で同じ結果を保証。\n'
-      + '- コントロールパネルは <div class="no-print"> で囲む。\n'
-      + '- <script>タグ内にJSを記述し、即時実行関数 (function(){...})() で囲む。\n\n'
+      + '- コントロールパネルは <div class="no-print" contenteditable="false"> で囲む。\n'
+      + '- <script>タグ内にJSを記述。グローバルスコープで関数を定義する（IIFEで囲まないこと）。\n'
+      + '- ボタンやinputのイベントは addEventListener で登録する（onclick属性は使わない）。\n'
+      + '- インタラクティブ要素を含むコンテナには contenteditable="false" を付与する。\n\n'
 
       + '【印刷への配慮】\n'
       + 'コントロールパネルには class="no-print" を付け、印刷時に非表示にする。\n'
