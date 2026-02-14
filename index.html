@@ -376,6 +376,14 @@
           </select>
         </div>
 
+        <!-- AIコメント一括生成 -->
+        <div class="p-3 border-top">
+          <button class="btn btn-sm btn-primary w-100" onclick="App.dbGenerateAIComments()">
+            <i class="bi bi-stars me-1"></i>AIコメント一括生成
+          </button>
+          <div class="form-text text-center mt-1" style="font-size:0.7em;">授業を選択してから押してください</div>
+        </div>
+
         <!-- 作成画面へのリンク -->
         <div class="mt-auto p-3 border-top">
           <button id="dbLinkToTeacher" class="btn btn-outline-secondary btn-sm w-100" onclick="App.dbGoTeacherMode()">
@@ -416,6 +424,39 @@
           </div>
         </div>
       </aside>
+
+      <!-- AIコメントレビューモーダル -->
+      <div class="modal fade" id="batchCommentModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+          <div class="modal-content">
+            <div class="modal-header bg-primary text-white py-2">
+              <h6 class="modal-title"><i class="bi bi-stars me-1"></i>AIコメント確認・返却</h6>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+              <div id="batchCommentInfo" class="bg-light px-3 py-2 border-bottom small"></div>
+              <table class="table table-hover mb-0" style="font-size:0.9em;">
+                <thead class="table-light sticky-top">
+                  <tr>
+                    <th style="width:36px;" class="text-center"><input type="checkbox" id="batchSelectAll" checked onchange="App._dbToggleAllComments(this.checked)"></th>
+                    <th style="width:100px;">名前</th>
+                    <th style="width:160px;">自己評価</th>
+                    <th>AIコメント（編集可能）</th>
+                  </tr>
+                </thead>
+                <tbody id="batchCommentBody"></tbody>
+              </table>
+            </div>
+            <div class="modal-footer py-2">
+              <span id="batchSelectedCount" class="text-muted small me-auto"></span>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="App.dbBatchReturn()">
+                <i class="bi bi-send-fill me-1"></i>選択した提出物を返却
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       <? } ?>
 
       <!-- ==========================================================
